@@ -36,6 +36,7 @@ Useful commands:
 ```sh
 npm run check       # type checking, unit tests and PostgreSQL integration tests
 npm run build       # compile TypeScript
+npm start           # run the compiled service after building
 npm run db:down     # stop the local database
 ```
 
@@ -60,7 +61,8 @@ wait for an explicit retry after the code is fixed.
 ## Key decisions
 
 - **Store before interpreting.** The HTTP endpoint acknowledges only that the
-  JSON has been parsed and writen to DB. An unexpected provider schema is not lost.
+  JSON has been parsed and written to the database. An unexpected provider schema
+  is not lost.
 - **First valid reference wins.** `application_reference` is the logical identity
   and a database constraint prevents more than one ingested or transformed form.
 - **Simple, layered pipeline.** Three tables (`raw_forms`, `ingested_forms`, and
