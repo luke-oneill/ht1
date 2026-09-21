@@ -248,4 +248,134 @@ describeDatabase("form processing", () => {
 		const raw = await testPool.query("SELECT status FROM raw_forms WHERE id = $1", [response.body.rawFormId]);
 		expect(raw.rows).toEqual([{ status: "ingested" }]);
 	});
+
+	it("replays failed validation from the unchanged raw form", async () => {
+		const applicationReference = `REPLAY-RAW-${randomUUID()}`;
+		const payload = { ...personOne, application_reference: applicationReference };
+		const app = createApp(testPool);
+		const received = await request(app).post("/ingest").send(payload);
+		await testPool.query(`
+			UPDATE raw_forms
+			SET status = 'invalid', error_message = 'rejected by the previous validator'
+			WHERE id = $1
+		`, [received.body.rawFormId]);
+
+		const beforeReplay = await request(app).get(`/ingestions/${received.body.rawFormId}`);
+		expect(beforeReplay.body).toMatchObject({
+			status: "failed",
+			failedStep: "raw_to_ingested",
+			errorMessage: "rejected by the previous validator",
+		});
+
+		const replay = await request(app).post(`/ingestions/${received.body.rawFormId}/retry`);
+		expect(replay.status).toBe(202);
+		expect(replay.body).toEqual({
+			ingestionId: received.body.rawFormId,
+			status: "received",
+		});
+
+		const worker = createFormWorker(testPool, jest.fn(), jest.fn());
+		await expect(worker.nextTick()).resolves.toMatchObject({
+			status: "ingested",
+			applicationReference,
+		});
+		const stored = await testPool.query(
+			"SELECT payload, error_message FROM raw_forms WHERE id = $1",
+			[received.body.rawFormId],
+		);
+		expect(stored.rows).toEqual([{ payload, error_message: null }]);
+	});
+
+	it("replays failed transformation from the ingested form", async () => {
+		const applicationReference = `REPLAY-TRANSFORM-${randomUUID()}`;
+		const app = createApp(testPool);
+		const received = await request(app).post("/ingest").send({
+			...personOne,
+			application_reference: applicationReference,
+		});
+		const geocode = jest.fn().mockResolvedValue({ longitude: -0.1, latitude: 51.5 });
+		const worker = createFormWorker(testPool, geocode, jest.fn());
+		await expect(worker.nextTick()).resolves.toMatchObject({ status: "ingested" });
+		await testPool.query(`
+			UPDATE ingested_forms
+			SET processing_status = 'invalid', processing_error = 'previous transform rejected the form'
+			WHERE raw_form_id = $1
+		`, [received.body.rawFormId]);
+
+		const replay = await request(app).post(`/ingestions/${received.body.rawFormId}/retry`);
+		expect(replay.status).toBe(202);
+		expect(replay.body.status).toBe("ingested");
+		await expect(worker.nextTick()).resolves.toEqual({
+			status: "transformed",
+			applicationReference,
+		});
+		expect(geocode).toHaveBeenCalledTimes(1);
+
+		const state = await testPool.query(`
+			SELECT raw.status AS raw_status, ingested.processing_status, ingested.processing_error
+			FROM raw_forms AS raw
+			JOIN ingested_forms AS ingested ON ingested.raw_form_id = raw.id
+			WHERE raw.id = $1
+		`, [received.body.rawFormId]);
+		expect(state.rows).toEqual([{
+			raw_status: "ingested",
+			processing_status: "transformed",
+			processing_error: null,
+		}]);
+	});
+
+	it("replays failed notification work from the transformed form", async () => {
+		const applicationReference = `REPLAY-NOTIFICATION-${randomUUID()}`;
+		const app = createApp(testPool);
+		const received = await request(app).post("/ingest").send({
+			...personOne,
+			application_reference: applicationReference,
+		});
+		const worker = createFormWorker(
+			testPool,
+			jest.fn().mockResolvedValue({ longitude: -0.1, latitude: 51.5 }),
+			jest.fn(),
+		);
+		await expect(worker.nextTick()).resolves.toMatchObject({ status: "ingested" });
+		await expect(worker.nextTick()).resolves.toMatchObject({ status: "transformed" });
+		await testPool.query(`
+			UPDATE ingested_forms
+			SET processing_status = 'failed', processing_error = 'message construction failed'
+			WHERE raw_form_id = $1
+		`, [received.body.rawFormId]);
+
+		const replay = await request(app).post(`/ingestions/${received.body.rawFormId}/retry`);
+		expect(replay.status).toBe(202);
+		expect(replay.body.status).toBe("transformed");
+
+		const state = await testPool.query(`
+			SELECT processing_status, processing_error
+			FROM ingested_forms
+			WHERE raw_form_id = $1
+		`, [received.body.rawFormId]);
+		expect(state.rows).toEqual([{
+			processing_status: "transformed",
+			processing_error: null,
+		}]);
+	});
+
+	it("rejects replay for a non-failed ingestion without changing it", async () => {
+		const app = createApp(testPool);
+		const received = await request(app).post("/ingest").send(personOne);
+		const before = await testPool.query(`
+			SELECT payload, status, error_message, last_attempted_at
+			FROM raw_forms
+			WHERE id = $1
+		`, [received.body.rawFormId]);
+
+		const replay = await request(app).post(`/ingestions/${received.body.rawFormId}/retry`);
+
+		expect(replay.status).toBe(409);
+		const after = await testPool.query(`
+			SELECT payload, status, error_message, last_attempted_at
+			FROM raw_forms
+			WHERE id = $1
+		`, [received.body.rawFormId]);
+		expect(after.rows).toEqual(before.rows);
+	});
 });

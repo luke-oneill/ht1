@@ -1,6 +1,7 @@
 import express, { NextFunction, Request, Response } from "express";
 import { Pool } from "pg";
 import { createIngestRouter } from "./routes/ingest";
+import { createIngestionsRouter } from "./routes/ingestions";
 
 interface BodyParserError extends Error {
 	status?: number;
@@ -21,6 +22,7 @@ export const createApp = (database: Pick<Pool, "query">) => {
 	});
 	app.use(express.json({ limit: "100kb" }));
 	app.use("/ingest", createIngestRouter(database));
+	app.use("/ingestions", createIngestionsRouter(database));
 
 	app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
 		if (!isBodyParserError(error)) {
