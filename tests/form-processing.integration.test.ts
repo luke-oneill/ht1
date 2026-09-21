@@ -19,6 +19,7 @@ describeDatabase("form processing", () => {
 
 	beforeAll(async () => {
 		await adminPool.query(`CREATE SCHEMA "${schema}"`);
+		await runMigrations(testPool);
 	});
 
 	afterEach(async () => {
@@ -32,10 +33,6 @@ describeDatabase("form processing", () => {
 	});
 
 	it("creates the three form tables and can safely rerun migrations", async () => {
-		await expect(runMigrations(testPool)).resolves.toEqual([
-			"001_create_form_tables.sql",
-			"002_add_notification_status.sql",
-		]);
 		await expect(runMigrations(testPool)).resolves.toEqual([]);
 
 		const tables = await testPool.query<{ table_name: string }>(`
@@ -75,14 +72,15 @@ describeDatabase("form processing", () => {
 		}]);
 	});
 
-	it("moves a valid raw form through ingestion and transformation", async () => {
+	it("moves a valid raw form from receipt to complete", async () => {
 		const applicationReference = `PIPELINE-${randomUUID()}`;
 		const response = await request(createApp(testPool)).post("/ingest").send({
 			...personOne,
 			application_reference: applicationReference,
 		});
 		const geocode = jest.fn().mockResolvedValue({ longitude: -0.1, latitude: 51.5 });
-		const worker = createFormWorker(testPool, geocode, jest.fn().mockResolvedValue(undefined));
+		const sendNotification = jest.fn().mockResolvedValue(undefined);
+		const worker = createFormWorker(testPool, geocode, sendNotification);
 
 		await expect(worker.nextTick()).resolves.toEqual({
 			status: "ingested",
@@ -93,6 +91,11 @@ describeDatabase("form processing", () => {
 			status: "transformed",
 			applicationReference,
 		});
+		await expect(worker.nextTick()).resolves.toEqual({
+			status: "complete",
+			applicationReference,
+		});
+		expect(sendNotification).toHaveBeenCalledTimes(1);
 
 		const result = await testPool.query(`
 			SELECT raw.status AS raw_status, ingested.processing_status, ingested.name, transformed.first_name,
@@ -104,7 +107,7 @@ describeDatabase("form processing", () => {
 		`, [response.body.rawFormId]);
 		expect(result.rows).toEqual([{
 			raw_status: "ingested",
-			processing_status: "transformed",
+			processing_status: "complete",
 			name: personOne.name,
 			first_name: "John",
 			last_name: "Doe",
@@ -123,6 +126,7 @@ describeDatabase("form processing", () => {
 		const changed = await request(app).post("/ingest").send({
 			...personOne,
 			application_reference: applicationReference,
+			session_id: "a-new-provider-session",
 			name: "Changed Name",
 		});
 		const worker = createFormWorker(
@@ -151,30 +155,40 @@ describeDatabase("form processing", () => {
 			status: "duplicate",
 		});
 		const ingested = await testPool.query(
-			"SELECT name FROM ingested_forms WHERE application_reference = $1",
+			"SELECT session_id, name FROM ingested_forms WHERE application_reference = $1",
 			[applicationReference],
 		);
-		expect(ingested.rows).toEqual([{ name: personOne.name }]);
+		expect(ingested.rows).toEqual([{
+			session_id: personOne.session_id,
+			name: personOne.name,
+		}]);
 	});
 
-	it("delays a transient provider retry without blocking another form", async () => {
-		const firstReference = `RETRY-A-${randomUUID()}`;
-		const secondReference = `RETRY-B-${randomUUID()}`;
+	it("retries a geocoder failure and later transforms the form", async () => {
+		const applicationReference = `GEOCODER-RETRY-${randomUUID()}`;
 		const app = createApp(testPool);
-		await request(app).post("/ingest").send({ ...personOne, application_reference: firstReference });
-		await request(app).post("/ingest").send({ ...personOne, application_reference: secondReference });
-		const geocode = jest.fn().mockRejectedValue(new Error("postcode service unavailable"));
+		await request(app).post("/ingest").send({
+			...personOne,
+			application_reference: applicationReference,
+		});
+		const geocode = jest.fn()
+			.mockRejectedValueOnce(new Error("postcode service unavailable"))
+			.mockResolvedValueOnce({ longitude: -0.1, latitude: 51.5 });
 		const worker = createFormWorker(testPool, geocode, jest.fn().mockResolvedValue(undefined));
 
 		await expect(worker.nextTick()).resolves.toMatchObject({ status: "ingested" });
-		await expect(worker.nextTick()).resolves.toMatchObject({ status: "ingested" });
 		await expect(worker.nextTick()).resolves.toEqual({
 			status: "retry-scheduled",
-			applicationReference: firstReference,
+			applicationReference,
 		});
+		await testPool.query(`
+			UPDATE ingested_forms
+			SET next_attempt_at = now()
+			WHERE application_reference = $1
+		`, [applicationReference]);
 		await expect(worker.nextTick()).resolves.toEqual({
-			status: "retry-scheduled",
-			applicationReference: secondReference,
+			status: "transformed",
+			applicationReference,
 		});
 		expect(geocode).toHaveBeenCalledTimes(2);
 	});

@@ -10,7 +10,7 @@
     "test": "jest --runInBand",
     "test:integration": "RUN_DATABASE_TESTS=true jest tests/form-processing.integration.test.ts --runInBand",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test",
+    "check": "npm run typecheck && npm test && npm run test:integration",
     "db:up": "docker compose up -d --wait postgres",
     "db:down": "docker compose down",
     "db:migrate": "ts-node src/database/migrate.ts",
