@@ -6,13 +6,19 @@ type IngestionRow = {
 	raw_form_id: string;
 	raw_status: "received" | "ingested" | "duplicate" | "invalid";
 	raw_error_message: string | null;
-	processing_status: "pending" | "transformed" | "complete" | "invalid" | "failed" | null;
+	processing_status: "pending" | "awaiting_notification" | "complete" | "invalid" | "failed" | null;
 	processing_error: string | null;
 	updated_at: Date | string;
 };
 
 export type FailedStep = "raw_to_ingested" | "ingested_to_transformed" | "send_notification";
-export type IngestionStatus = "received" | "ingested" | "transformed" | "complete" | "duplicate" | "failed";
+export type IngestionStatus =
+	| "received"
+	| "ingested"
+	| "awaiting-notification"
+	| "complete"
+	| "duplicate"
+	| "failed";
 
 export type IngestionInspection = {
 	ingestionId: string;
@@ -27,7 +33,7 @@ export type RetryIngestionResult =
 	| { outcome: "not-failed" }
 	| {
 		outcome: "retried";
-		status: "received" | "ingested" | "transformed";
+		status: "received" | "ingested" | "awaiting-notification";
 		failedStep: FailedStep;
 	};
 
@@ -98,10 +104,12 @@ const toInspection = (row: IngestionRow): IngestionInspection => {
 
 	const status = row.processing_status === "pending"
 		? "ingested"
-		: row.processing_status ?? "ingested";
+		: row.processing_status === "awaiting_notification"
+			? "awaiting-notification"
+			: row.processing_status ?? "ingested";
 	const failedStep = row.processing_error === null
 		? null
-		: row.processing_status === "transformed"
+		: row.processing_status === "awaiting_notification"
 			? "send_notification"
 			: "ingested_to_transformed";
 
@@ -126,7 +134,7 @@ const resetFailedIngestion = async (
 	database: Database,
 	ingestionId: string,
 	failedStep: FailedStep,
-): Promise<"received" | "ingested" | "transformed" | undefined> => {
+): Promise<"received" | "ingested" | "awaiting-notification" | undefined> => {
 	switch (failedStep) {
 		case "raw_to_ingested": {
 			const updated = await database.query(`
@@ -148,11 +156,11 @@ const resetFailedIngestion = async (
 		case "send_notification": {
 			const updated = await database.query(`
 				UPDATE ingested_forms
-				SET processing_status = 'transformed', processing_error = NULL,
+				SET processing_status = 'awaiting_notification', processing_error = NULL,
 					next_attempt_at = now(), last_attempted_at = now()
 				WHERE raw_form_id::text = $1 AND processing_status = 'failed'
 			`, [ingestionId]);
-			return updated.rowCount === 0 ? undefined : "transformed";
+			return updated.rowCount === 0 ? undefined : "awaiting-notification";
 		}
 	}
 };

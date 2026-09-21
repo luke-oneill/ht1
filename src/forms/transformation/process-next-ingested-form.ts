@@ -16,7 +16,7 @@ type IngestedFormRow = Omit<IngestedForm, "address"> & {
 };
 
 export type ProcessIngestedFormResult = {
-	status: "transformed" | "retry-scheduled" | "invalid";
+	status: "awaiting-notification" | "retry-scheduled" | "invalid";
 	applicationReference: string;
 };
 
@@ -116,7 +116,8 @@ export const processNextIngestedForm = async (
 			ON CONFLICT (application_reference) DO NOTHING
 		)
 		UPDATE ingested_forms
-		SET processing_status = 'transformed', processing_error = NULL, last_attempted_at = now()
+		SET processing_status = 'awaiting_notification', processing_error = NULL,
+			last_attempted_at = now()
 		WHERE application_reference = $1
 	`, [
 		transformed.applicationReference,
@@ -139,5 +140,5 @@ export const processNextIngestedForm = async (
 	console.info("Worker transformed form", {
 		applicationReference: form.application_reference,
 	});
-	return { status: "transformed", applicationReference: form.application_reference };
+	return { status: "awaiting-notification", applicationReference: form.application_reference };
 };

@@ -49,7 +49,7 @@ npm run db:down     # stop the local database
    retained and marked as duplicates. The worker rotates across stages so new
    deliveries cannot starve forms already further through the pipeline.
 3. The worker looks up the postcode, transforms the ingested form into FORM-BOT's
-   shape, and stores the transformed form.
+   shape, stores it, and marks it as awaiting notification.
 4. It emails `happyforms@bots.com` and marks the work complete only after the
    provider reports success.
 

@@ -28,7 +28,7 @@ describe("ingestion inspection", () => {
 	it.each([
 		["received", row({ raw_status: "received", processing_status: null })],
 		["ingested", row({ processing_status: "pending" })],
-		["transformed", row({ processing_status: "transformed" })],
+		["awaiting-notification", row({ processing_status: "awaiting_notification" })],
 		["duplicate", row({ raw_status: "duplicate", processing_status: null })],
 		["complete", row()],
 	])("returns the %s state without form data", async (status, ingestion) => {
@@ -83,7 +83,7 @@ describe("ingestion replay", () => {
 	it.each([
 		["validation", row({ raw_status: "invalid", processing_status: null }), "received"],
 		["transformation", row({ processing_status: "invalid" }), "ingested"],
-		["notification", row({ processing_status: "failed" }), "transformed"],
+		["notification", row({ processing_status: "failed" }), "awaiting-notification"],
 	])("resets a failed %s from its last valid layer", async (
 		_stage,
 		ingestion,

@@ -24,7 +24,13 @@ CREATE TABLE ingested_forms (
     postcode text NOT NULL,
     country text NOT NULL,
     processing_status text NOT NULL DEFAULT 'pending'
-        CHECK (processing_status IN ('pending', 'transformed', 'invalid')),
+        CHECK (processing_status IN (
+            'pending',
+            'awaiting_notification',
+            'complete',
+            'invalid',
+            'failed'
+        )),
     processing_error text,
     next_attempt_at timestamptz NOT NULL DEFAULT now(),
     last_attempted_at timestamptz,

@@ -34,6 +34,10 @@ describeDatabase("form processing", () => {
 
 	it("creates the three form tables and can safely rerun migrations", async () => {
 		await expect(runMigrations(testPool)).resolves.toEqual([]);
+		const migrations = await testPool.query<{ name: string }>(
+			"SELECT name FROM schema_migrations ORDER BY name",
+		);
+		expect(migrations.rows).toEqual([{ name: "001_create_form_tables.sql" }]);
 
 		const tables = await testPool.query<{ table_name: string }>(`
 			SELECT table_name
@@ -45,6 +49,40 @@ describeDatabase("form processing", () => {
 			"raw_forms",
 			"transformed_forms",
 		]);
+	});
+
+	it("accepts every processing status and rejects unknown values", async () => {
+		const rawFormId = randomUUID();
+		const applicationReference = `STATUSES-${randomUUID()}`;
+		await testPool.query(
+			"INSERT INTO raw_forms (id, payload, status) VALUES ($1, $2, 'ingested')",
+			[rawFormId, {}],
+		);
+		await testPool.query(`
+			INSERT INTO ingested_forms (
+				application_reference, raw_form_id, session_id, name, email, gender,
+				date_of_birth, mobile_number, address_line_1, address_line_2, postcode, country
+			) VALUES ($1, $2, 'session', 'Test Person', 'test@example.com', 'other',
+				'2000-01-01', '07000000000', '1 Test Street', 'Test Town', 'TE1 1ST', 'UK')
+		`, [applicationReference, rawFormId]);
+
+		for (const status of [
+			"pending",
+			"awaiting_notification",
+			"complete",
+			"invalid",
+			"failed",
+		]) {
+			await expect(testPool.query(`
+				UPDATE ingested_forms SET processing_status = $2
+				WHERE application_reference = $1
+			`, [applicationReference, status])).resolves.toMatchObject({ rowCount: 1 });
+		}
+
+		await expect(testPool.query(`
+			UPDATE ingested_forms SET processing_status = 'transformed'
+			WHERE application_reference = $1
+		`, [applicationReference])).rejects.toThrow(/processing_status_check/);
 	});
 
 	it("retains invalid forms with a useful validation error", async () => {
@@ -88,7 +126,7 @@ describeDatabase("form processing", () => {
 			applicationReference,
 		});
 		await expect(worker.nextTick()).resolves.toEqual({
-			status: "transformed",
+			status: "awaiting-notification",
 			applicationReference,
 		});
 		await expect(worker.nextTick()).resolves.toEqual({
@@ -137,7 +175,7 @@ describeDatabase("form processing", () => {
 
 		await expect(worker.nextTick()).resolves.toMatchObject({ status: "ingested" });
 		await expect(worker.nextTick()).resolves.toEqual({
-			status: "transformed",
+			status: "awaiting-notification",
 			applicationReference,
 		});
 		await expect(worker.nextTick()).resolves.toMatchObject({ status: "complete" });
@@ -189,7 +227,7 @@ describeDatabase("form processing", () => {
 		});
 
 		await expect(worker.nextTick()).resolves.toEqual({
-			status: "transformed",
+			status: "awaiting-notification",
 			applicationReference: firstReference,
 		});
 		const unprocessed = await testPool.query(
@@ -255,7 +293,7 @@ describeDatabase("form processing", () => {
 			WHERE application_reference = $1
 		`, [applicationReference]);
 		await expect(worker.nextTick()).resolves.toEqual({
-			status: "transformed",
+			status: "awaiting-notification",
 			applicationReference,
 		});
 		expect(geocode).toHaveBeenCalledTimes(2);
@@ -272,7 +310,7 @@ describeDatabase("form processing", () => {
 		const firstWorker = createFormWorker(testPool, geocode, failingSender);
 
 		await expect(firstWorker.nextTick()).resolves.toMatchObject({ status: "ingested" });
-		await expect(firstWorker.nextTick()).resolves.toMatchObject({ status: "transformed" });
+		await expect(firstWorker.nextTick()).resolves.toMatchObject({ status: "awaiting-notification" });
 		await expect(firstWorker.nextTick()).resolves.toEqual({
 			status: "retry-scheduled",
 			applicationReference,
@@ -284,7 +322,7 @@ describeDatabase("form processing", () => {
 			WHERE application_reference = $1
 		`, [applicationReference]);
 		expect(state.rows).toEqual([{
-			processing_status: "transformed",
+			processing_status: "awaiting_notification",
 			processing_error: "email service unavailable",
 		}]);
 
@@ -388,7 +426,7 @@ describeDatabase("form processing", () => {
 		expect(replay.status).toBe(202);
 		expect(replay.body.status).toBe("ingested");
 		await expect(worker.nextTick()).resolves.toEqual({
-			status: "transformed",
+			status: "awaiting-notification",
 			applicationReference,
 		});
 		expect(geocode).toHaveBeenCalledTimes(1);
@@ -401,7 +439,7 @@ describeDatabase("form processing", () => {
 		`, [received.body.rawFormId]);
 		expect(state.rows).toEqual([{
 			raw_status: "ingested",
-			processing_status: "transformed",
+			processing_status: "awaiting_notification",
 			processing_error: null,
 		}]);
 	});
@@ -419,7 +457,7 @@ describeDatabase("form processing", () => {
 			jest.fn(),
 		);
 		await expect(worker.nextTick()).resolves.toMatchObject({ status: "ingested" });
-		await expect(worker.nextTick()).resolves.toMatchObject({ status: "transformed" });
+		await expect(worker.nextTick()).resolves.toMatchObject({ status: "awaiting-notification" });
 		await testPool.query(`
 			UPDATE ingested_forms
 			SET processing_status = 'failed', processing_error = 'message construction failed'
@@ -428,7 +466,7 @@ describeDatabase("form processing", () => {
 
 		const replay = await request(app).post(`/ingestions/${received.body.rawFormId}/retry`);
 		expect(replay.status).toBe(202);
-		expect(replay.body.status).toBe("transformed");
+		expect(replay.body.status).toBe("awaiting-notification");
 
 		const state = await testPool.query(`
 			SELECT processing_status, processing_error
@@ -436,7 +474,7 @@ describeDatabase("form processing", () => {
 			WHERE raw_form_id = $1
 		`, [received.body.rawFormId]);
 		expect(state.rows).toEqual([{
-			processing_status: "transformed",
+			processing_status: "awaiting_notification",
 			processing_error: null,
 		}]);
 	});

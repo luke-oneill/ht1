@@ -24,7 +24,7 @@ export const processNextTransformedForm = async (
 		SELECT transformed.application_reference
 		FROM transformed_forms AS transformed
 		JOIN ingested_forms AS ingested USING (application_reference)
-		WHERE ingested.processing_status = 'transformed'
+		WHERE ingested.processing_status = 'awaiting_notification'
 			AND ingested.next_attempt_at <= now()
 		ORDER BY ingested.next_attempt_at, ingested.created_at, transformed.application_reference
 		LIMIT 1
