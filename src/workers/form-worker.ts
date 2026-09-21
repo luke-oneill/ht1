@@ -1,6 +1,9 @@
 import { Pool } from "pg";
+import type { SendNotification } from "../forms/contracts/notification-message";
 import { processNextRawForm } from "../forms/ingestion/process-next-raw-form";
 import type { ProcessRawFormResult } from "../forms/ingestion/process-next-raw-form";
+import { processNextTransformedForm } from "../forms/notification/process-next-transformed-form";
+import type { ProcessTransformedFormResult } from "../forms/notification/process-next-transformed-form";
 import { processNextIngestedForm } from "../forms/transformation/process-next-ingested-form";
 import type { ProcessIngestedFormResult } from "../forms/transformation/process-next-ingested-form";
 import type { Coordinates } from "../forms/transformation/transform-form";
@@ -11,11 +14,17 @@ type Geocode = (postcode: string) => Promise<Coordinates>;
 export type WorkerResult =
 	| { status: "idle" }
 	| ProcessRawFormResult
-	| ProcessIngestedFormResult;
+	| ProcessIngestedFormResult
+	| ProcessTransformedFormResult;
 
-export const createFormWorker = (database: Database, geocode: Geocode) => ({
+export const createFormWorker = (
+	database: Database,
+	geocode: Geocode,
+	sendNotification: SendNotification,
+) => ({
 	async nextTick(): Promise<WorkerResult> {
-		return await processNextRawForm(database)
+		return await processNextTransformedForm(database, sendNotification)
+			?? await processNextRawForm(database)
 			?? await processNextIngestedForm(database, geocode)
 			?? { status: "idle" };
 	},

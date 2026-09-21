@@ -1,6 +1,7 @@
 import { createApp } from "./app";
 import { createDatabasePool, verifyDatabaseConnection } from "./database/pool";
 import { geocodePostcode } from "./integrations/postcode-geocoder";
+import { sendNotificationEmail } from "./integrations/email-sender";
 import { createFormWorker, startFormWorker } from "./workers/form-worker";
 
 const PORT = process.env.PORT || 3000;
@@ -16,7 +17,11 @@ const start = async (): Promise<void> => {
 	}
 
 	const app = createApp(pool);
-	const stopWorker = startFormWorker(createFormWorker(pool, geocodePostcode));
+	const stopWorker = startFormWorker(createFormWorker(
+		pool,
+		geocodePostcode,
+		sendNotificationEmail,
+	));
 	const server = app.listen(PORT, () => {
 		console.log(`Server is running on http://localhost:${PORT}`);
 	});
