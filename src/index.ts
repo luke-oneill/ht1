@@ -1,6 +1,5 @@
 import { createApp } from "./app";
 import { createDatabasePool, verifyDatabaseConnection } from "./infrastructure/database";
-import { createServices } from "./services";
 
 const PORT = process.env.PORT || 3000;
 
@@ -14,7 +13,7 @@ const start = async (): Promise<void> => {
 		throw error;
 	}
 
-	const app = createApp(createServices(pool));
+	const app = createApp(pool);
 	const server = app.listen(PORT, () => {
 		console.log(`Server is running on http://localhost:${PORT}`);
 	});

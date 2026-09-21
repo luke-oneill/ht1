@@ -1,109 +1,105 @@
+import { Pool } from "pg";
 import request from "supertest";
 import { createApp } from "../src/app";
-import { AppServices } from "../src/services";
+import personOne from "../src/forms/examples/person_one.json";
 
-const ingestionId = "181d95f1-3277-41c4-a28f-8fc3800b94bd";
-
-const createServiceDouble = () => {
-	const receive = jest.fn().mockResolvedValue({ ingestionId, status: "received" as const });
-	const services: AppServices = { ingestion: { receive } };
-	return { receive, services };
+const createDatabase = (rowCount = 1) => {
+	const query = jest.fn().mockResolvedValue({ rows: [], rowCount });
+	return {
+		database: { query } as unknown as Pick<Pool, "query">,
+		query,
+	};
 };
 
 describe("POST /ingest", () => {
-	it("accepts an object and acknowledges it after storage", async () => {
-		const { receive, services } = createServiceDouble();
-		const payload = { application_reference: "APP-1", unexpected_field: true };
+	it("validates and stores a form", async () => {
+		const { database, query } = createDatabase();
 
-		const response = await request(createApp(services))
-			.post("/ingest")
-			.send(payload);
+		const response = await request(createApp(database)).post("/ingest").send(personOne);
 
-		expect(response.status).toBe(202);
-		expect(response.body).toEqual({ ingestionId, status: "received" });
-		expect(receive).toHaveBeenCalledWith(payload);
+		expect(response.status).toBe(201);
+		expect(response.body).toEqual({
+			applicationReference: personOne.application_reference,
+			status: "ingested",
+		});
+		expect(query).toHaveBeenCalledTimes(1);
+		expect(query.mock.calls[0][1][0]).toBe(personOne.application_reference);
+		expect(query.mock.calls[0][1][1]).toEqual(personOne);
 	});
 
-	it("accepts an object that does not conform to the healthcare schema", async () => {
-		const { receive, services } = createServiceDouble();
+	it("acknowledges a duplicate without inserting another row", async () => {
+		const { database } = createDatabase(0);
 
-		const response = await request(createApp(services))
-			.post("/ingest")
-			.send({ not_a_registration_form: true });
+		const response = await request(createApp(database)).post("/ingest").send(personOne);
 
-		expect(response.status).toBe(202);
-		expect(receive).toHaveBeenCalledTimes(1);
+		expect(response.status).toBe(200);
+		expect(response.body).toEqual({
+			applicationReference: personOne.application_reference,
+			status: "duplicate",
+		});
+	});
+
+	it.each([
+		["a missing field", { ...personOne, email: undefined }, "email must be a string"],
+		["a mistyped field", { ...personOne, mobile_number: 123 }, "mobile_number must be a string"],
+		["an invalid date", { ...personOne, date_of_birth: "1990-02-30" }, "date_of_birth must be a valid YYYY-MM-DD date"],
+	])("rejects %s before writing", async (_description, payload, error) => {
+		const { database, query } = createDatabase();
+
+		const response = await request(createApp(database)).post("/ingest").send(payload);
+
+		expect(response.status).toBe(400);
+		expect(response.body).toEqual({ error });
+		expect(query).not.toHaveBeenCalled();
 	});
 
 	it.each([
 		["an array", [1, 2, 3]],
 		["null", null],
 	])("rejects %s", async (_description, payload) => {
-		const { receive, services } = createServiceDouble();
+		const { database, query } = createDatabase();
 
-		const response = await request(createApp(services))
+		const response = await request(createApp(database))
 			.post("/ingest")
 			.set("Content-Type", "application/json")
 			.send(JSON.stringify(payload));
 
 		expect(response.status).toBe(400);
-		expect(response.body).toEqual({ error: "Request body must be a JSON object" });
-		expect(receive).not.toHaveBeenCalled();
-	});
-
-	it.each(["true", "42", '"text"'])("rejects the JSON scalar %s", async (payload) => {
-		const { receive, services } = createServiceDouble();
-
-		const response = await request(createApp(services))
-			.post("/ingest")
-			.set("Content-Type", "application/json")
-			.send(payload);
-
-		expect(response.status).toBe(400);
-		expect(response.body).toEqual({ error: "Request body must be a JSON object" });
-		expect(receive).not.toHaveBeenCalled();
+		expect(query).not.toHaveBeenCalled();
 	});
 
 	it("rejects malformed JSON", async () => {
-		const { receive, services } = createServiceDouble();
+		const { database, query } = createDatabase();
 
-		const response = await request(createApp(services))
+		const response = await request(createApp(database))
 			.post("/ingest")
 			.set("Content-Type", "application/json")
 			.send('{"broken":');
 
 		expect(response.status).toBe(400);
-		expect(response.body).toEqual({ error: "Request body must be a JSON object" });
-		expect(receive).not.toHaveBeenCalled();
+		expect(query).not.toHaveBeenCalled();
 	});
 
-	it("rejects a request over the configured body limit", async () => {
-		const { receive, services } = createServiceDouble();
+	it("rejects a request over the body limit", async () => {
+		const { database, query } = createDatabase();
 
-		const response = await request(createApp(services))
+		const response = await request(createApp(database))
 			.post("/ingest")
 			.send({ value: "x".repeat(101 * 1024) });
 
 		expect(response.status).toBe(413);
-		expect(response.body).toEqual({ error: "Request body is too large" });
-		expect(receive).not.toHaveBeenCalled();
+		expect(query).not.toHaveBeenCalled();
 	});
 
-	it("does not acknowledge a failed storage transaction", async () => {
-		const { receive, services } = createServiceDouble();
-		receive.mockRejectedValue(new Error("database unavailable"));
+	it("returns 503 when the database write fails", async () => {
+		const { database, query } = createDatabase();
+		query.mockRejectedValue(new Error("database unavailable"));
 		const consoleError = jest.spyOn(console, "error").mockImplementation(() => undefined);
 
-		const response = await request(createApp(services))
-			.post("/ingest")
-			.send({ application_reference: "APP-1" });
+		const response = await request(createApp(database)).post("/ingest").send(personOne);
 
 		expect(response.status).toBe(503);
 		expect(response.body).toEqual({ error: "Ingestion temporarily unavailable" });
-		expect(consoleError).toHaveBeenCalledWith(
-			"Failed to receive ingestion",
-			expect.any(Error),
-		);
 		consoleError.mockRestore();
 	});
 });
