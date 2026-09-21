@@ -7,7 +7,7 @@
     "build": "tsc",
     "start": "node dist/src/index.js",
     "dev": "ts-node-dev --respawn src/index.ts",
-    "test": "jest --runInBand",
+    "test": "jest --config jest.unit.config.js --runInBand",
     "test:integration": "RUN_DATABASE_TESTS=true jest tests/form-processing.integration.test.ts --runInBand",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test && npm run test:integration",
