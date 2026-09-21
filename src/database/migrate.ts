@@ -1,5 +1,5 @@
-import { createDatabasePool, verifyDatabaseConnection } from "./database";
-import { runMigrations } from "./migrations";
+import { runMigrations } from "./migration-runner";
+import { createDatabasePool, verifyDatabaseConnection } from "./pool";
 
 const migrate = async (): Promise<void> => {
 	const pool = createDatabasePool();

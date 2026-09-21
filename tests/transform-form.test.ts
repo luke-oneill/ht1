@@ -1,7 +1,7 @@
-import personOne from "../src/forms/examples/person_one.json";
-import personTwo from "../src/forms/examples/person_two.json";
-import { parseIngestedForm } from "../src/forms/schemas/ingested_schema";
-import { transformForm } from "../src/forms/transform";
+import { parseIngestedForm } from "../src/forms/ingestion/parse-ingested-form";
+import { transformForm } from "../src/forms/transformation/transform-form";
+import personOne from "../src/supplied/examples/person_one.json";
+import personTwo from "../src/supplied/examples/person_two.json";
 
 describe("transformForm", () => {
 	it("maps every field and adds coordinates", () => {

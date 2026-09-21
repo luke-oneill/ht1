@@ -1,10 +1,10 @@
 import { Pool } from "pg";
 import request from "supertest";
 import { createApp } from "../src/app";
-import personOne from "../src/forms/examples/person_one.json";
+import personOne from "../src/supplied/examples/person_one.json";
 
-const createDatabase = (rowCount = 1) => {
-	const query = jest.fn().mockResolvedValue({ rows: [], rowCount });
+const createDatabase = () => {
+	const query = jest.fn().mockResolvedValue({ rows: [], rowCount: 1 });
 	return {
 		database: { query } as unknown as Pick<Pool, "query">,
 		query,
@@ -12,45 +12,23 @@ const createDatabase = (rowCount = 1) => {
 };
 
 describe("POST /ingest", () => {
-	it("validates and stores a form", async () => {
-		const { database, query } = createDatabase();
-
-		const response = await request(createApp(database)).post("/ingest").send(personOne);
-
-		expect(response.status).toBe(201);
-		expect(response.body).toEqual({
-			applicationReference: personOne.application_reference,
-			status: "ingested",
-		});
-		expect(query).toHaveBeenCalledTimes(1);
-		expect(query.mock.calls[0][1][0]).toBe(personOne.application_reference);
-		expect(query.mock.calls[0][1][1]).toEqual(personOne);
-	});
-
-	it("acknowledges a duplicate without inserting another row", async () => {
-		const { database } = createDatabase(0);
-
-		const response = await request(createApp(database)).post("/ingest").send(personOne);
-
-		expect(response.status).toBe(200);
-		expect(response.body).toEqual({
-			applicationReference: personOne.application_reference,
-			status: "duplicate",
-		});
-	});
-
 	it.each([
-		["a missing field", { ...personOne, email: undefined }, "email must be a string"],
-		["a mistyped field", { ...personOne, mobile_number: 123 }, "mobile_number must be a string"],
-		["an invalid date", { ...personOne, date_of_birth: "1990-02-30" }, "date_of_birth must be a valid YYYY-MM-DD date"],
-	])("rejects %s before writing", async (_description, payload, error) => {
+		["a valid form", personOne],
+		["a schema-invalid form", { unexpected_new_schema: true }],
+	])("durably receives %s without interpreting it", async (_description, payload) => {
 		const { database, query } = createDatabase();
 
 		const response = await request(createApp(database)).post("/ingest").send(payload);
 
-		expect(response.status).toBe(400);
-		expect(response.body).toEqual({ error });
-		expect(query).not.toHaveBeenCalled();
+		expect(response.status).toBe(202);
+		expect(response.body).toEqual({
+			rawFormId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+			status: "received",
+		});
+		expect(query).toHaveBeenCalledWith(
+			"INSERT INTO raw_forms (id, payload) VALUES ($1, $2)",
+			[response.body.rawFormId, payload],
+		);
 	});
 
 	it.each([
@@ -91,7 +69,7 @@ describe("POST /ingest", () => {
 		expect(query).not.toHaveBeenCalled();
 	});
 
-	it("returns 503 when the database write fails", async () => {
+	it("does not acknowledge a failed database write", async () => {
 		const { database, query } = createDatabase();
 		query.mockRejectedValue(new Error("database unavailable"));
 		const consoleError = jest.spyOn(console, "error").mockImplementation(() => undefined);

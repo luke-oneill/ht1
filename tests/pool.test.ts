@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-import { databaseConfig, verifyDatabaseConnection } from "../src/infrastructure/database";
+import { databaseConfig, verifyDatabaseConnection } from "../src/database/pool";
 
 describe("database configuration", () => {
 	it("prefers DATABASE_URL when supplied", () => {

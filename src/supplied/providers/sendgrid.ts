@@ -1,4 +1,4 @@
-import { HttpResponse } from "./httpresponse";
+import type { HttpResponse } from "./http-response";
 
 export const sendEmail = async ({ to, from, subject, body }: { to: string; from: string; subject: string; body: string }): Promise<HttpResponse<void>> => {
 	// Generate a random number between 0 and 1

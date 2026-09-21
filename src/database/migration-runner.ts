@@ -4,7 +4,7 @@ import { Pool } from "pg";
 
 export const defaultMigrationsDirectory = path.resolve(
 	process.cwd(),
-	"src/infrastructure/migrations",
+	"src/database/migrations",
 );
 
 export const runMigrations = async (

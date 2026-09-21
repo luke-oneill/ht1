@@ -1,5 +1,5 @@
-import type { IngestedFormSchema } from "./schemas/ingested_schema";
-import type { TransformedFormSchema } from "./schemas/transformed_schema";
+import type { IngestedForm } from "../contracts/ingested-form";
+import type { TransformedForm } from "../contracts/transformed-form";
 
 export interface Coordinates {
 	longitude: number;
@@ -7,9 +7,9 @@ export interface Coordinates {
 }
 
 export const transformForm = (
-	form: IngestedFormSchema,
+	form: IngestedForm,
 	coordinates: Coordinates,
-): TransformedFormSchema => {
+): TransformedForm => {
 	const [firstName, ...remainingNames] = form.name.trim().split(/\s+/);
 
 	return {

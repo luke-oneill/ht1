@@ -1,7 +1,7 @@
 import { createApp } from "./app";
-import { createFormWorker, startFormWorker } from "./forms/worker";
-import { createDatabasePool, verifyDatabaseConnection } from "./infrastructure/database";
-import { geocodePostcode } from "./providers/idealpostcodes";
+import { createDatabasePool, verifyDatabaseConnection } from "./database/pool";
+import { geocodePostcode } from "./integrations/postcode-geocoder";
+import { createFormWorker, startFormWorker } from "./workers/form-worker";
 
 const PORT = process.env.PORT || 3000;
 

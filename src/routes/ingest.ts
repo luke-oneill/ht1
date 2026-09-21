@@ -1,33 +1,25 @@
 import { Router } from "express";
 import { Pool } from "pg";
-import { ingestForm } from "../forms/ingest";
-import { InvalidFormError, parseIngestedForm } from "../forms/schemas/ingested_schema";
+import { storeRawForm } from "../forms/ingestion/store-raw-form";
+
+const isJsonObject = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
 
 export const createIngestRouter = (database: Pick<Pool, "query">): Router => {
 	const router = Router();
 
 	router.post("/", async (req, res) => {
+		if (!isJsonObject(req.body)) {
+			res.status(400).json({ error: "Request body must be a JSON object" });
+			return;
+		}
+
 		try {
-			const form = parseIngestedForm(req.body);
-			const result = await ingestForm(database, req.body, form);
-			const status = result.created ? "ingested" : "duplicate";
-			console.info("Form ingestion completed", {
-				applicationReference: result.applicationReference,
-				status,
-			});
-
-			res.status(result.created ? 201 : 200).json({
-				applicationReference: result.applicationReference,
-				status,
-			});
+			const receipt = await storeRawForm(database, req.body);
+			console.info("Raw form received", { rawFormId: receipt.rawFormId });
+			res.status(202).json(receipt);
 		} catch (error) {
-			if (error instanceof InvalidFormError) {
-				console.warn("Form ingestion rejected", { error: error.message });
-				res.status(400).json({ error: error.message });
-				return;
-			}
-
-			console.error("Failed to ingest form", error);
+			console.error("Failed to receive raw form", error);
 			res.status(503).json({ error: "Ingestion temporarily unavailable" });
 		}
 	});
