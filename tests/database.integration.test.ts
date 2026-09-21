@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
+import request from "supertest";
+import { createApp } from "../src/app";
+import personOne from "../src/forms/examples/person_one.json";
 import { databaseConfig } from "../src/infrastructure/database";
 import { runMigrations } from "../src/infrastructure/migrations";
+import { createServices } from "../src/services";
 
 const describeDatabase = process.env.RUN_DATABASE_TESTS === "true" ? describe : describe.skip;
 
@@ -40,6 +44,58 @@ describeDatabase("database migrations", () => {
 			"payload",
 			"created_at",
 		]);
+	});
+
+	it.each([
+		["the supplied valid fixture", personOne],
+		["a schema-invalid object", { unexpected_field: true, nested: { value: "preserved" } }],
+	])("durably creates both rows for %s", async (_description, payload) => {
+		const app = createApp(createServices(testPool));
+		const response = await request(app).post("/ingest").send(payload);
+
+		expect(response.status).toBe(202);
+		expect(response.body).toMatchObject({ status: "received" });
+		const result = await testPool.query<{
+			payload: Record<string, unknown>;
+			status: string;
+		}>(`
+			SELECT raw.payload, ingestions.status
+			FROM raw
+			JOIN ingestions ON ingestions.raw_id = raw.id
+			WHERE raw.id = $1
+		`, [response.body.ingestionId]);
+
+		expect(result.rows).toEqual([{ payload, status: "received" }]);
+	});
+
+	it("rolls back raw storage and returns 503 when ingestion state cannot be stored", async () => {
+		await testPool.query(`
+			CREATE FUNCTION reject_ingestion_insert() RETURNS trigger AS $$
+			BEGIN
+				RAISE EXCEPTION 'forced ingestion insert failure';
+			END;
+			$$ LANGUAGE plpgsql
+		`);
+		await testPool.query(`
+			CREATE TRIGGER reject_ingestion_insert
+			BEFORE INSERT ON ingestions
+			FOR EACH ROW EXECUTE FUNCTION reject_ingestion_insert()
+		`);
+		const rawCountBefore = await testPool.query<{ count: string }>("SELECT count(*) FROM raw");
+		const consoleError = jest.spyOn(console, "error").mockImplementation(() => undefined);
+
+		try {
+			const app = createApp(createServices(testPool));
+			const response = await request(app).post("/ingest").send({ data: true });
+			const rawCountAfter = await testPool.query<{ count: string }>("SELECT count(*) FROM raw");
+
+			expect(response.status).toBe(503);
+			expect(rawCountAfter.rows[0].count).toBe(rawCountBefore.rows[0].count);
+		} finally {
+			consoleError.mockRestore();
+			await testPool.query("DROP TRIGGER reject_ingestion_insert ON ingestions");
+			await testPool.query("DROP FUNCTION reject_ingestion_insert()");
+		}
 	});
 
 	it("enforces one intermediate and primary row per application reference", async () => {
