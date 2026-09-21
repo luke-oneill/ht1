@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import request from "supertest";
 import { createApp } from "../src/app";
 import personOne from "../src/forms/examples/person_one.json";
+import { createFormWorker } from "../src/forms/worker";
 import { databaseConfig } from "../src/infrastructure/database";
 import { runMigrations } from "../src/infrastructure/migrations";
 
@@ -28,7 +29,7 @@ describeDatabase("ingested forms", () => {
 
 	it("creates the database schema and can safely rerun migrations", async () => {
 		await expect(runMigrations(testPool)).resolves.toEqual([
-			"001_create_ingested_forms.sql",
+			"001_create_form_tables.sql",
 		]);
 		await expect(runMigrations(testPool)).resolves.toEqual([]);
 
@@ -37,7 +38,83 @@ describeDatabase("ingested forms", () => {
 			FROM information_schema.tables
 			WHERE table_schema = current_schema() AND table_name <> 'schema_migrations'
 		`);
-		expect(tables.rows).toEqual([{ table_name: "ingested_forms" }]);
+		expect(tables.rows.map(({ table_name }) => table_name).sort()).toEqual([
+			"ingested_forms",
+			"transformed_forms",
+		]);
+	});
+
+	it("enriches and transforms an ingested form", async () => {
+		const applicationReference = `WORKER-${randomUUID()}`;
+		await request(createApp(testPool)).post("/ingest").send({
+			...personOne,
+			application_reference: applicationReference,
+		});
+		const worker = createFormWorker(
+			testPool,
+			jest.fn().mockResolvedValue({ longitude: -0.1, latitude: 51.5 }),
+		);
+
+		await expect(worker.nextTick()).resolves.toEqual({
+			status: "transformed",
+			applicationReference,
+		});
+		const result = await testPool.query(
+			"SELECT * FROM transformed_forms WHERE application_reference = $1",
+			[applicationReference],
+		);
+		expect(result.rows[0]).toMatchObject({
+			application_reference: applicationReference,
+			first_name: "John",
+			last_name: "Doe",
+			date_of_birth: new Date("1990-01-01T00:00:00.000Z"),
+			longitude: -0.1,
+			latitude: 51.5,
+		});
+		await expect(worker.nextTick()).resolves.toEqual({ status: "idle" });
+	});
+
+	it("moves past a provider failure and retries it later", async () => {
+		const firstReference = `RETRY-FIRST-${randomUUID()}`;
+		const secondReference = `RETRY-SECOND-${randomUUID()}`;
+		const app = createApp(testPool);
+		await request(app).post("/ingest").send({
+			...personOne,
+			application_reference: firstReference,
+		});
+		await request(app).post("/ingest").send({
+			...personOne,
+			application_reference: secondReference,
+		});
+		const geocode = jest.fn()
+			.mockRejectedValueOnce(new Error("postcode service unavailable"))
+			.mockResolvedValue({ longitude: -0.1, latitude: 51.5 });
+		const worker = createFormWorker(testPool, geocode);
+
+		await expect(worker.nextTick()).resolves.toEqual({
+			status: "failed",
+			applicationReference: firstReference,
+		});
+		await expect(worker.nextTick()).resolves.toEqual({
+			status: "transformed",
+			applicationReference: secondReference,
+		});
+		await expect(worker.nextTick()).resolves.toEqual({
+			status: "transformed",
+			applicationReference: firstReference,
+		});
+
+		const result = await testPool.query(`
+			SELECT ingested.application_reference, ingested.processing_error
+			FROM ingested_forms AS ingested
+			JOIN transformed_forms AS transformed USING (application_reference)
+			WHERE ingested.application_reference IN ($1, $2)
+			ORDER BY ingested.application_reference
+		`, [firstReference, secondReference]);
+		expect(result.rows).toEqual([
+			{ application_reference: firstReference, processing_error: null },
+			{ application_reference: secondReference, processing_error: null },
+		]);
 	});
 
 	it("stores the raw payload and extracted fields in one row", async () => {

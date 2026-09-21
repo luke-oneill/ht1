@@ -10,13 +10,19 @@ export const createIngestRouter = (database: Pick<Pool, "query">): Router => {
 		try {
 			const form = parseIngestedForm(req.body);
 			const result = await ingestForm(database, req.body, form);
+			const status = result.created ? "ingested" : "duplicate";
+			console.info("Form ingestion completed", {
+				applicationReference: result.applicationReference,
+				status,
+			});
 
 			res.status(result.created ? 201 : 200).json({
 				applicationReference: result.applicationReference,
-				status: result.created ? "ingested" : "duplicate",
+				status,
 			});
 		} catch (error) {
 			if (error instanceof InvalidFormError) {
+				console.warn("Form ingestion rejected", { error: error.message });
 				res.status(400).json({ error: error.message });
 				return;
 			}

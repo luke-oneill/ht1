@@ -15,6 +15,10 @@ const isBodyParserError = (error: unknown): error is BodyParserError => {
 export const createApp = (database: Pick<Pool, "query">) => {
 	const app = express();
 
+	app.use((req, _res, next) => {
+		console.info("Request received", { method: req.method, path: req.path });
+		next();
+	});
 	app.use(express.json({ limit: "100kb" }));
 	app.use("/ingest", createIngestRouter(database));
 
