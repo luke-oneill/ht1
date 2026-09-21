@@ -1,7 +1,6 @@
 import express, { NextFunction, Request, Response } from "express";
 import { Pool } from "pg";
-import { ingestForm } from "./forms/ingest";
-import { InvalidFormError, parseIngestedForm } from "./forms/schemas/ingested_schema";
+import { createIngestRouter } from "./routes/ingest";
 
 interface BodyParserError extends Error {
 	status?: number;
@@ -17,23 +16,7 @@ export const createApp = (database: Pick<Pool, "query">) => {
 	const app = express();
 
 	app.use(express.json({ limit: "100kb" }));
-	app.post("/ingest", async (req, res) => {
-		try {
-			const form = parseIngestedForm(req.body);
-			const result = await ingestForm(database, req.body, form);
-			res.status(result.created ? 201 : 200).json({
-				applicationReference: result.applicationReference,
-				status: result.created ? "ingested" : "duplicate",
-			});
-		} catch (error) {
-			if (error instanceof InvalidFormError) {
-				res.status(400).json({ error: error.message });
-				return;
-			}
-			console.error("Failed to ingest form", error);
-			res.status(503).json({ error: "Ingestion temporarily unavailable" });
-		}
-	});
+	app.use("/ingest", createIngestRouter(database));
 
 	app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
 		if (!isBodyParserError(error)) {
