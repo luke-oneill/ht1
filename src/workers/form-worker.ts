@@ -21,14 +21,29 @@ export const createFormWorker = (
 	database: Database,
 	geocode: Geocode,
 	sendNotification: SendNotification,
-) => ({
-	async nextTick(): Promise<WorkerResult> {
-		return await processNextTransformedForm(database, sendNotification)
-			?? await processNextRawForm(database)
-			?? await processNextIngestedForm(database, geocode)
-			?? { status: "idle" };
-	},
-});
+) => {
+	const stages = [
+		() => processNextTransformedForm(database, sendNotification),
+		() => processNextRawForm(database),
+		() => processNextIngestedForm(database, geocode),
+	];
+	let nextStageIndex = 0;
+
+	return {
+		async nextTick(): Promise<WorkerResult> {
+			for (let offset = 0; offset < stages.length; offset += 1) {
+				const stageIndex = (nextStageIndex + offset) % stages.length;
+				const result = await stages[stageIndex]();
+				if (result) {
+					nextStageIndex = (stageIndex + 1) % stages.length;
+					return result;
+				}
+			}
+
+			return { status: "idle" };
+		},
+	};
+};
 
 export type FormWorker = ReturnType<typeof createFormWorker>;
 

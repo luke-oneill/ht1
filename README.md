@@ -46,7 +46,8 @@ npm run db:down     # stop the local database
 1. `POST /ingest` accepts any JSON object and stores every delivery as a raw form.
 2. A sequential worker validates the next raw form. The first valid delivery for
    an `application_reference` becomes the ingested form; later deliveries are
-   retained and marked as duplicates.
+   retained and marked as duplicates. The worker rotates across stages so new
+   deliveries cannot starve forms already further through the pipeline.
 3. The worker looks up the postcode, transforms the ingested form into FORM-BOT's
    shape, and stores the transformed form.
 4. It emails `happyforms@bots.com` and marks the work complete only after the

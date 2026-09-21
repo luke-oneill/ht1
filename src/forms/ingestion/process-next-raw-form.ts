@@ -50,10 +50,18 @@ export const processNextRawForm = async (
 				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
 			)
 			ON CONFLICT (application_reference) DO NOTHING
-			RETURNING application_reference
+			RETURNING raw_form_id
+		), existing_owner AS (
+			SELECT raw_form_id
+			FROM ingested_forms
+			WHERE application_reference = $1
 		)
 		UPDATE raw_forms
-		SET status = CASE WHEN EXISTS (SELECT 1 FROM inserted) THEN 'ingested' ELSE 'duplicate' END,
+		SET status = CASE
+				WHEN EXISTS (SELECT 1 FROM inserted) THEN 'ingested'
+				WHEN EXISTS (SELECT 1 FROM existing_owner WHERE raw_form_id = $2) THEN 'ingested'
+				ELSE 'duplicate'
+			END,
 			error_message = NULL,
 			last_attempted_at = now()
 		WHERE id = $2

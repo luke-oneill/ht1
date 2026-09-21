@@ -137,12 +137,13 @@ describeDatabase("form processing", () => {
 
 		await expect(worker.nextTick()).resolves.toMatchObject({ status: "ingested" });
 		await expect(worker.nextTick()).resolves.toEqual({
-			status: "duplicate",
-			rawFormId: changed.body.rawFormId,
+			status: "transformed",
 			applicationReference,
 		});
+		await expect(worker.nextTick()).resolves.toMatchObject({ status: "complete" });
 		await expect(worker.nextTick()).resolves.toEqual({
-			status: "transformed",
+			status: "duplicate",
+			rawFormId: changed.body.rawFormId,
 			applicationReference,
 		});
 		const raw = await testPool.query(
@@ -162,6 +163,73 @@ describeDatabase("form processing", () => {
 			session_id: personOne.session_id,
 			name: personOne.name,
 		}]);
+	});
+
+	it("rotates stages so new deliveries do not starve an ingested form", async () => {
+		const firstReference = `FAIRNESS-A-${randomUUID()}`;
+		const secondReference = `FAIRNESS-B-${randomUUID()}`;
+		const app = createApp(testPool);
+		await request(app).post("/ingest").send({
+			...personOne,
+			application_reference: firstReference,
+		});
+		const worker = createFormWorker(
+			testPool,
+			jest.fn().mockResolvedValue({ longitude: -0.1, latitude: 51.5 }),
+			jest.fn().mockResolvedValue(undefined),
+		);
+
+		await expect(worker.nextTick()).resolves.toMatchObject({
+			status: "ingested",
+			applicationReference: firstReference,
+		});
+		const second = await request(app).post("/ingest").send({
+			...personOne,
+			application_reference: secondReference,
+		});
+
+		await expect(worker.nextTick()).resolves.toEqual({
+			status: "transformed",
+			applicationReference: firstReference,
+		});
+		const unprocessed = await testPool.query(
+			"SELECT status FROM raw_forms WHERE id = $1",
+			[second.body.rawFormId],
+		);
+		expect(unprocessed.rows).toEqual([{ status: "received" }]);
+	});
+
+	it("treats raw-form re-entry as ingested when it already owns the reference", async () => {
+		const applicationReference = `REENTRY-${randomUUID()}`;
+		const received = await request(createApp(testPool)).post("/ingest").send({
+			...personOne,
+			application_reference: applicationReference,
+		});
+		const createWorker = () => createFormWorker(
+			testPool,
+			jest.fn().mockResolvedValue({ longitude: -0.1, latitude: 51.5 }),
+			jest.fn().mockResolvedValue(undefined),
+		);
+
+		await expect(createWorker().nextTick()).resolves.toMatchObject({ status: "ingested" });
+		await testPool.query(
+			"UPDATE raw_forms SET status = 'received' WHERE id = $1",
+			[received.body.rawFormId],
+		);
+
+		await expect(createWorker().nextTick()).resolves.toEqual({
+			status: "ingested",
+			rawFormId: received.body.rawFormId,
+			applicationReference,
+		});
+		const state = await testPool.query(`
+			SELECT raw.status, count(ingested.application_reference)::int AS ingested_count
+			FROM raw_forms AS raw
+			LEFT JOIN ingested_forms AS ingested ON ingested.raw_form_id = raw.id
+			WHERE raw.id = $1
+			GROUP BY raw.status
+		`, [received.body.rawFormId]);
+		expect(state.rows).toEqual([{ status: "ingested", ingested_count: 1 }]);
 	});
 
 	it("retries a geocoder failure and later transforms the form", async () => {
