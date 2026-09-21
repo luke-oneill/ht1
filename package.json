@@ -5,9 +5,16 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "node dist/src/index.js",
     "dev": "ts-node-dev --respawn src/index.ts",
-    "test": "jest"
+    "test": "jest --runInBand",
+    "test:integration": "RUN_DATABASE_TESTS=true jest tests/database.integration.test.ts --runInBand",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test",
+    "db:up": "docker compose up -d --wait postgres",
+    "db:down": "docker compose down",
+    "db:migrate": "ts-node src/infrastructure/migrate.ts",
+    "db": "npm run db:up && npm run db:migrate"
   },
   "keywords": [],
   "license": "ISC",
@@ -15,14 +22,17 @@
     "@types/express": "^5.0.0",
     "@types/jest": "^29.0.0",
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1",
     "@types/supertest": "^6.0.0",
     "jest": "^29.7.0",
     "supertest": "^7.0.0",
     "ts-jest": "^29.0.0",
+    "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "express": "^4.22.1"
+    "express": "^4.22.1",
+    "pg": "^8.23.0"
   }
 }
