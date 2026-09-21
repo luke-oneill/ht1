@@ -40,4 +40,11 @@ describe("transformForm", () => {
 		expect(transformed.lastName).toBe("James Smith-Jones");
 		expect(transformed.gender).toBe("prefer-not-to-say");
 	});
+
+	it("defensively rejects an ingested form without a last name", () => {
+		const form = { ...parseIngestedForm(personOne), name: "Madonna" };
+
+		expect(() => transformForm(form, { longitude: 0, latitude: 0 }))
+			.toThrow("name must include a first name and last name");
+	});
 });

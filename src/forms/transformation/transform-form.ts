@@ -11,6 +11,9 @@ export const transformForm = (
 	coordinates: Coordinates,
 ): TransformedForm => {
 	const [firstName, ...remainingNames] = form.name.trim().split(/\s+/);
+	if (remainingNames.length === 0) {
+		throw new Error("name must include a first name and last name");
+	}
 
 	return {
 		sessionId: form.session_id,

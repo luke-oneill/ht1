@@ -85,6 +85,48 @@ describeDatabase("form processing", () => {
 		`, [applicationReference])).rejects.toThrow(/processing_status_check/);
 	});
 
+	it("enforces required first and last names at both storage boundaries", async () => {
+		const rawFormId = randomUUID();
+		const applicationReference = `NAME-CONSTRAINTS-${randomUUID()}`;
+		await testPool.query(
+			"INSERT INTO raw_forms (id, payload, status) VALUES ($1, $2, 'ingested')",
+			[rawFormId, {}],
+		);
+
+		await expect(testPool.query(`
+			INSERT INTO ingested_forms (
+				application_reference, raw_form_id, session_id, name, email, gender,
+				date_of_birth, mobile_number, address_line_1, address_line_2, postcode, country
+			) VALUES ($1, $2, 'session', 'Madonna', 'test@example.com', 'other',
+				'2000-01-01', '07000000000', '1 Test Street', 'Test Town', 'TE1 1ST', 'UK')
+		`, [applicationReference, rawFormId])).rejects.toThrow(/ingested_forms_name_check/);
+
+		await testPool.query(`
+			INSERT INTO ingested_forms (
+				application_reference, raw_form_id, session_id, name, email, gender,
+				date_of_birth, mobile_number, address_line_1, address_line_2, postcode, country
+			) VALUES ($1, $2, 'session', 'Test Example Person', 'test@example.com', 'other',
+				'2000-01-01', '07000000000', '1 Test Street', 'Test Town', 'TE1 1ST', 'UK')
+		`, [applicationReference, rawFormId]);
+
+		const insertTransformedName = (firstName: string, lastName: string) => testPool.query(`
+			INSERT INTO transformed_forms (
+				application_reference, session_id, first_name, last_name, email, gender,
+				date_of_birth, mobile_number, address_line_1, address_line_2, postcode,
+				country, longitude, latitude
+			) VALUES ($1, 'session', $2, $3, 'test@example.com', 'prefer-not-to-say',
+				'2000-01-01', '07000000000', '1 Test Street', 'Test Town', 'TE1 1ST',
+				'UK', 0, 0)
+		`, [applicationReference, firstName, lastName]);
+
+		await expect(insertTransformedName("", "Example Person"))
+			.rejects.toThrow(/transformed_forms_first_name_check/);
+		await expect(insertTransformedName("Test", ""))
+			.rejects.toThrow(/transformed_forms_last_name_check/);
+		await expect(insertTransformedName("Test", "Example Person"))
+			.resolves.toMatchObject({ rowCount: 1 });
+	});
+
 	it("retains invalid forms with a useful validation error", async () => {
 		const payload = { changed_provider_schema: true };
 		const response = await request(createApp(testPool)).post("/ingest").send(payload);
@@ -107,6 +149,26 @@ describeDatabase("form processing", () => {
 			payload,
 			status: "invalid",
 			error_message: "address must be an object",
+		}]);
+	});
+
+	it("retains a single-token name as an invalid raw form", async () => {
+		const payload = { ...personOne, name: "  Madonna  " };
+		const response = await request(createApp(testPool)).post("/ingest").send(payload);
+		const worker = createFormWorker(testPool, jest.fn(), jest.fn());
+
+		await expect(worker.nextTick()).resolves.toEqual({
+			status: "invalid",
+			rawFormId: response.body.rawFormId,
+		});
+		const result = await testPool.query(
+			"SELECT payload, status, error_message FROM raw_forms WHERE id = $1",
+			[response.body.rawFormId],
+		);
+		expect(result.rows).toEqual([{
+			payload,
+			status: "invalid",
+			error_message: "name must include a first name and last name",
 		}]);
 	});
 

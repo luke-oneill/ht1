@@ -5,7 +5,7 @@ describe("form validation", () => {
 	it("accepts unknown fields and normalises surrounding whitespace", () => {
 		const parsed = parseIngestedForm({
 			...personOne,
-			name: "  John Doe  ",
+			name: "  John \t  Doe  ",
 			provider_added_field: true,
 		});
 
@@ -14,6 +14,8 @@ describe("form validation", () => {
 
 	it.each([
 		["blank application_reference", { ...personOne, application_reference: "  " }, "application_reference must be a non-empty string"],
+		["blank name", { ...personOne, name: " \t " }, "name must be a non-empty string"],
+		["a single-token name", { ...personOne, name: "Madonna" }, "name must include a first name and last name"],
 		["invalid email", { ...personOne, email: "not-an-email" }, "email must be a valid email address"],
 		["invalid date", { ...personOne, date_of_birth: "1990-02-30" }, "date_of_birth must be a valid YYYY-MM-DD date"],
 	])("rejects %s", (_description, value, message) => {

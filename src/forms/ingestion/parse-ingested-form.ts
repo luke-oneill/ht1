@@ -22,6 +22,14 @@ const optionalString = (value: unknown, field: string): string | undefined => {
 	return parsed;
 };
 
+const fullName = (value: unknown): string => {
+	const parts = requiredString(value, "name").split(/\s+/);
+	if (parts.length < 2) {
+		throw new InvalidFormError("name must include a first name and last name");
+	}
+	return parts.join(" ");
+};
+
 const date = (value: unknown): string => {
 	const dateOfBirth = requiredString(value, "date_of_birth");
 	const parsedDate = new Date(`${dateOfBirth}T00:00:00.000Z`);
@@ -50,7 +58,7 @@ export const parseIngestedForm = (value: unknown): IngestedForm => {
 	return {
 		session_id: requiredString(form.session_id, "session_id"),
 		application_reference: requiredString(form.application_reference, "application_reference"),
-		name: requiredString(form.name, "name"),
+		name: fullName(form.name),
 		email,
 		gender: form.gender,
 		date_of_birth: date(form.date_of_birth),
