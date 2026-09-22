@@ -11,6 +11,5 @@
 		"address_line_2": "London",
 		"postcode": "SW1A 1AA",
 		"country": "United Kingdom"
-	},
-	"provider_version": "unexpected-but-tolerated"
+	}
 }

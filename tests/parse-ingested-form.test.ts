@@ -1,15 +1,26 @@
 import { parseIngestedForm } from "../src/forms/ingestion/parse-ingested-form";
+import ethnicityExample from "../src/supplied/examples/manual_06_unexpected_ethnicity.json";
 import personOne from "../src/supplied/examples/person_one.json";
 
 describe("form validation", () => {
-	it("accepts unknown fields and normalises surrounding whitespace", () => {
+	it("normalises surrounding whitespace", () => {
 		const parsed = parseIngestedForm({
 			...personOne,
 			name: "  John \t  Doe  ",
-			provider_added_field: true,
 		});
 
 		expect(parsed.name).toBe("John Doe");
+	});
+
+	it.each([
+		["a top-level field", ethnicityExample, "unexpected field: ethnicity"],
+		[
+			"a nested address field",
+			{ ...personOne, address: { ...personOne.address, county: "example value" } },
+			"unexpected field: address.county",
+		],
+	])("rejects schema drift from %s", (_description, value, message) => {
+		expect(() => parseIngestedForm(value)).toThrow(message);
 	});
 
 	it.each([

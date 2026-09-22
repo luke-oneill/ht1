@@ -2,7 +2,8 @@ import { Pool } from "pg";
 import type { IngestedForm } from "../contracts/ingested-form";
 import {
 	InvalidFormError,
-	parseIngestedFormWithDrift,
+	parseIngestedForm,
+	SchemaDriftError,
 } from "./parse-ingested-form";
 
 type Database = Pick<Pool, "query">;
@@ -27,9 +28,8 @@ export const processNextRawForm = async (
 	console.info("Worker picked up raw form", { rawFormId: rawForm.id });
 
 	let form: IngestedForm;
-	let unexpectedFieldPaths: string[];
 	try {
-		({ form, unexpectedFieldPaths } = parseIngestedFormWithDrift(rawForm.payload));
+		form = parseIngestedForm(rawForm.payload);
 	} catch (error) {
 		if (!(error instanceof InvalidFormError)) throw error;
 		await database.query(`
@@ -37,19 +37,18 @@ export const processNextRawForm = async (
 			SET status = 'invalid', error_message = $2, last_attempted_at = now()
 			WHERE id = $1
 		`, [rawForm.id, error.message]);
-		console.warn("Raw form failed validation", {
-			rawFormId: rawForm.id,
-			error: error.message,
-		});
+		if (error instanceof SchemaDriftError) {
+			console.warn("Provider schema drift prevented ingestion", {
+				rawFormId: rawForm.id,
+				unexpectedFieldPaths: error.unexpectedFieldPaths,
+			});
+		} else {
+			console.warn("Raw form failed validation", {
+				rawFormId: rawForm.id,
+				error: error.message,
+			});
+		}
 		return { status: "invalid", rawFormId: rawForm.id };
-	}
-
-	if (unexpectedFieldPaths.length > 0) {
-		console.warn("Provider schema drift detected", {
-			rawFormId: rawForm.id,
-			applicationReference: form.application_reference,
-			unexpectedFieldPaths,
-		});
 	}
 
 	const saved = await database.query<{

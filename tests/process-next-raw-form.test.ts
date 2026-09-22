@@ -15,7 +15,7 @@ const databaseWithPayload = (payload: unknown): Pool => ({
 } as unknown as Pool);
 
 describe("raw form schema drift", () => {
-	it("warns once for unexpected top-level and address fields without logging their values", async () => {
+	it("fails ingestion and warns once without logging unexpected field values", async () => {
 		const privateValue = "must-not-appear-in-the-log";
 		const database = databaseWithPayload({
 			...personOne,
@@ -26,12 +26,14 @@ describe("raw form schema drift", () => {
 			},
 		});
 
-		await processNextRawForm(database);
+		await expect(processNextRawForm(database)).resolves.toEqual({
+			status: "invalid",
+			rawFormId: "raw-form-1",
+		});
 
 		expect(console.warn).toHaveBeenCalledTimes(1);
-		expect(console.warn).toHaveBeenCalledWith("Provider schema drift detected", {
+		expect(console.warn).toHaveBeenCalledWith("Provider schema drift prevented ingestion", {
 			rawFormId: "raw-form-1",
-			applicationReference: personOne.application_reference,
 			unexpectedFieldPaths: ["address.county", "provider_added_field"],
 		});
 		expect(JSON.stringify((console.warn as jest.Mock).mock.calls)).not.toContain(privateValue);

@@ -82,7 +82,8 @@ wait for an explicit retry after the code is fixed.
 
 - **Store before interpreting.** The HTTP endpoint acknowledges only that the
   JSON has been parsed and written to the database. An unexpected provider schema
-  is not lost.
+  is not lost. Unexpected fields fail validation and emit a warning so support
+  can be deployed before replaying the raw form.
 - **Separate redelivery from conflict.** `application_reference` is the logical
   identity. Identical payloads are benign duplicates; changed payloads are held
   as conflicts so a correction is not silently discarded or applied. Resolving

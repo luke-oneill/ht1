@@ -2,8 +2,31 @@ import type { IngestedForm } from "../contracts/ingested-form";
 
 export class InvalidFormError extends Error {}
 
+export class SchemaDriftError extends InvalidFormError {
+	constructor(public readonly unexpectedFieldPaths: string[]) {
+		super(`unexpected field${unexpectedFieldPaths.length === 1 ? "" : "s"}: ${unexpectedFieldPaths.join(", ")}`);
+	}
+}
+
 const isObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
+
+const findUnexpectedFormFieldPaths = (
+	value: unknown,
+	parsed: IngestedForm,
+): string[] => {
+	if (!isObject(value)) return [];
+
+	const paths = Object.keys(value)
+		.filter((key) => !Object.hasOwn(parsed, key));
+	if (isObject(value.address)) {
+		paths.push(...Object.keys(value.address)
+			.filter((key) => !Object.hasOwn(parsed.address, key))
+			.map((key) => `address.${key}`));
+	}
+
+	return paths.sort();
+};
 
 const object = (value: unknown, field: string): Record<string, unknown> => {
 	if (!isObject(value)) {
@@ -21,8 +44,7 @@ const requiredString = (value: unknown, field: string): string => {
 
 const optionalString = (value: unknown, field: string): string | undefined => {
 	if (value === undefined || value === null) return undefined;
-	const parsed = requiredString(value, field);
-	return parsed;
+	return requiredString(value, field);
 };
 
 const fullName = (value: unknown): string => {
@@ -46,65 +68,39 @@ const date = (value: unknown): string => {
 	return dateOfBirth;
 };
 
-export type ParsedIngestedForm = {
-	form: IngestedForm;
-	unexpectedFieldPaths: string[];
-};
-
-export const parseIngestedFormWithDrift = (value: unknown): ParsedIngestedForm => {
-	const {
-		session_id,
-		application_reference,
-		name,
-		email: emailValue,
-		gender,
-		date_of_birth,
-		phone_number,
-		mobile_number,
-		address: addressValue,
-		...unexpectedFormFields
-	} = object(value, "form");
-	const {
-		address_line_1,
-		address_line_2,
-		address_line_3,
-		postcode,
-		country,
-		...unexpectedAddressFields
-	} = object(addressValue, "address");
-	const email = requiredString(emailValue, "email");
+export const parseIngestedForm = (value: unknown): IngestedForm => {
+	const form = object(value, "form");
+	const address = object(form.address, "address");
+	const email = requiredString(form.email, "email");
 
 	if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
 		throw new InvalidFormError("email must be a valid email address");
 	}
-	if (gender !== "male" && gender !== "female" && gender !== "other") {
+	if (form.gender !== "male" && form.gender !== "female" && form.gender !== "other") {
 		throw new InvalidFormError("gender must be male, female or other");
 	}
 
-	return {
-		form: {
-			session_id: requiredString(session_id, "session_id"),
-			application_reference: requiredString(application_reference, "application_reference"),
-			name: fullName(name),
-			email,
-			gender,
-			date_of_birth: date(date_of_birth),
-			phone_number: optionalString(phone_number, "phone_number"),
-			mobile_number: requiredString(mobile_number, "mobile_number"),
-			address: {
-				address_line_1: requiredString(address_line_1, "address.address_line_1"),
-				address_line_2: requiredString(address_line_2, "address.address_line_2"),
-				address_line_3: optionalString(address_line_3, "address.address_line_3"),
-				postcode: requiredString(postcode, "address.postcode"),
-				country: requiredString(country, "address.country"),
-			},
+	const parsed: IngestedForm = {
+		session_id: requiredString(form.session_id, "session_id"),
+		application_reference: requiredString(form.application_reference, "application_reference"),
+		name: fullName(form.name),
+		email,
+		gender: form.gender,
+		date_of_birth: date(form.date_of_birth),
+		phone_number: optionalString(form.phone_number, "phone_number"),
+		mobile_number: requiredString(form.mobile_number, "mobile_number"),
+		address: {
+			address_line_1: requiredString(address.address_line_1, "address.address_line_1"),
+			address_line_2: requiredString(address.address_line_2, "address.address_line_2"),
+			address_line_3: optionalString(address.address_line_3, "address.address_line_3"),
+			postcode: requiredString(address.postcode, "address.postcode"),
+			country: requiredString(address.country, "address.country"),
 		},
-		unexpectedFieldPaths: [
-			...Object.keys(unexpectedFormFields),
-			...Object.keys(unexpectedAddressFields).map((key) => `address.${key}`),
-		].sort(),
 	};
-};
 
-export const parseIngestedForm = (value: unknown): IngestedForm =>
-	parseIngestedFormWithDrift(value).form;
+	const unexpectedFieldPaths = findUnexpectedFormFieldPaths(value, parsed);
+	if (unexpectedFieldPaths.length > 0) {
+		throw new SchemaDriftError(unexpectedFieldPaths);
+	}
+	return parsed;
+};
