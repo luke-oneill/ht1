@@ -5,7 +5,7 @@ provider and prepares the first valid form for FORM-BOT.
 
 ## Run locally
 
-You need Node.js, npm and Docker.
+You need Node.js 22, npm, and Docker with Docker Compose.
 
 ```sh
 npm ci
@@ -40,13 +40,26 @@ curl 'http://localhost:3000/ingestions?status=conflict&limit=50'
 Useful commands:
 
 ```sh
-npm run check       # type checking, unit tests and PostgreSQL integration tests
 npm run build       # compile TypeScript
 npm start           # run the compiled service after building
 npm run db:down     # stop the local database
 ```
 
-`npm run check` expects the database started by `npm run db` to be available.
+## Verify changes
+
+Start and migrate PostgreSQL before running the checks locally:
+
+```sh
+npm run db
+npm run typecheck
+npm test
+npm run test:integration
+git diff --check
+```
+
+`npm run check` runs the first three checks as a convenience. GitHub Actions
+runs all four commands against a PostgreSQL 16 service for pull requests to
+`main`.
 
 ## What the service does
 
