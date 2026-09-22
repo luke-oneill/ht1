@@ -105,6 +105,49 @@ describe("ingestion inspection", () => {
 	});
 });
 
+describe("conflict listing", () => {
+	it("returns bounded conflict metadata without form payloads", async () => {
+		const createdAt = "2026-09-22T09:00:00.000Z";
+		const acceptedId = "70f74dbe-a196-440b-9702-c7688d06054b";
+		const { database, query } = createDatabase({
+			rows: [{
+				conflict_raw_form_id: ingestionId,
+				accepted_raw_form_id: acceptedId,
+				created_at: createdAt,
+			}],
+			rowCount: 1,
+		});
+
+		const response = await request(createApp(database))
+			.get("/ingestions?status=conflict&limit=10");
+
+		expect(response.status).toBe(200);
+		expect(response.body).toEqual({
+			ingestions: [{
+				ingestionId,
+				acceptedIngestionId: acceptedId,
+				createdAt,
+			}],
+			hasMore: false,
+		});
+		expect(response.body.ingestions[0]).not.toHaveProperty("payload");
+		expect(query).toHaveBeenCalledWith(expect.stringContaining("WHERE status = 'conflict'"), [11]);
+	});
+
+	it.each([
+		["a missing status", "/ingestions"],
+		["an unsupported status", "/ingestions?status=duplicate"],
+		["an invalid limit", "/ingestions?status=conflict&limit=101"],
+	])("rejects %s without querying the database", async (_description, path) => {
+		const { database, query } = createDatabase();
+
+		const response = await request(createApp(database)).get(path);
+
+		expect(response.status).toBe(400);
+		expect(query).not.toHaveBeenCalled();
+	});
+});
+
 describe("ingestion replay", () => {
 	it.each([
 		["validation", row({ raw_status: "invalid", processing_status: null }), "received"],

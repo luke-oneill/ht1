@@ -1,11 +1,35 @@
 import { Router } from "express";
 import { Pool } from "pg";
-import { inspectIngestion, retryIngestion } from "../forms/inspection/ingestion-status";
+import {
+	inspectIngestion,
+	listConflictingIngestions,
+	retryIngestion,
+} from "../forms/inspection/ingestion-status";
 
 type Database = Pick<Pool, "query">;
 
 export const createIngestionsRouter = (database: Database): Router => {
 	const router = Router();
+
+	router.get("/", async (req, res) => {
+		if (req.query.status !== "conflict") {
+			res.status(400).json({ error: "status must be conflict" });
+			return;
+		}
+
+		const limit = req.query.limit === undefined ? 50 : Number(req.query.limit);
+		if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+			res.status(400).json({ error: "limit must be an integer between 1 and 100" });
+			return;
+		}
+
+		try {
+			res.json(await listConflictingIngestions(database, limit));
+		} catch (error) {
+			console.error("Failed to list conflicting ingestions", { error });
+			res.status(503).json({ error: "Ingestion list temporarily unavailable" });
+		}
+	});
 
 	router.get("/:id", async (req, res) => {
 		try {

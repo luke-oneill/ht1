@@ -31,6 +31,12 @@ curl http://localhost:3000/ingestions/<rawFormId>
 curl -X POST http://localhost:3000/ingestions/<rawFormId>/retry
 ```
 
+List the most recent conflicting deliveries without exposing their payloads:
+
+```sh
+curl 'http://localhost:3000/ingestions?status=conflict&limit=50'
+```
+
 Useful commands:
 
 ```sh
@@ -46,9 +52,10 @@ npm run db:down     # stop the local database
 
 1. `POST /ingest` accepts any JSON object and stores every delivery as a raw form.
 2. A sequential worker validates the next raw form. The first valid delivery for
-   an `application_reference` becomes the ingested form; later deliveries are
-   retained and marked as duplicates. The worker rotates across stages so new
-   deliveries cannot starve forms already further through the pipeline.
+   an `application_reference` becomes the ingested form; identical redeliveries
+   are duplicates and changed deliveries are held for review as conflicts. The
+   worker rotates across stages so new deliveries cannot starve forms already
+   further through the pipeline.
 3. The worker looks up the postcode, transforms the ingested form into FORM-BOT's
    shape, stores it, and marks it as awaiting notification.
 4. It emails `happyforms@bots.com` and marks the work complete only after the
@@ -63,8 +70,10 @@ wait for an explicit retry after the code is fixed.
 - **Store before interpreting.** The HTTP endpoint acknowledges only that the
   JSON has been parsed and written to the database. An unexpected provider schema
   is not lost.
-- **First valid reference wins.** `application_reference` is the logical identity
-  and a database constraint prevents more than one ingested or transformed form.
+- **Separate redelivery from conflict.** `application_reference` is the logical
+  identity. Identical payloads are benign duplicates; changed payloads are held
+  as conflicts so a correction is not silently discarded or applied. Resolving
+  those conflicts is deliberately left to a future product decision.
 - **Simple, layered pipeline.** Three tables (`raw_forms`, `ingested_forms`, and
   `transformed_forms`) make the processing stages visible without a generic
   workflow layer. Raw payloads are never changed, data flows downstream.

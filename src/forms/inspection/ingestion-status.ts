@@ -31,6 +31,23 @@ export type IngestionInspection = {
 	acceptedIngestionId?: string;
 };
 
+type ConflictRow = {
+	conflict_raw_form_id: string;
+	accepted_raw_form_id: string;
+	created_at: Date | string;
+};
+
+export type ConflictSummary = {
+	ingestionId: string;
+	acceptedIngestionId: string;
+	createdAt: Date | string;
+};
+
+export type ConflictList = {
+	ingestions: ConflictSummary[];
+	hasMore: boolean;
+};
+
 export type RetryIngestionResult =
 	| { outcome: "not-found" }
 	| { outcome: "not-failed" }
@@ -139,6 +156,37 @@ export const inspectIngestion = async (
 ): Promise<IngestionInspection | undefined> => {
 	const row = await selectIngestion(database, ingestionId);
 	return row && toInspection(row);
+};
+
+export const listConflictingIngestions = async (
+	database: Database,
+	limit: number,
+): Promise<ConflictList> => {
+	const result = await database.query<ConflictRow>(`
+		SELECT conflict_raw_form_id, accepted_raw_form_id, created_at
+		FROM (
+			SELECT
+				id::text AS conflict_raw_form_id,
+				accepted_raw_form_id::text,
+				created_at
+			FROM raw_forms
+			WHERE status = 'conflict'
+			ORDER BY created_at DESC, id DESC
+			LIMIT $1
+		) AS recent_conflicts
+		ORDER BY created_at, conflict_raw_form_id
+	`, [limit + 1]);
+	const hasMore = result.rows.length > limit;
+	const rows = hasMore ? result.rows.slice(1) : result.rows;
+
+	return {
+		ingestions: rows.map((row) => ({
+			ingestionId: row.conflict_raw_form_id,
+			acceptedIngestionId: row.accepted_raw_form_id,
+			createdAt: row.created_at,
+		})),
+		hasMore,
+	};
 };
 
 const resetFailedIngestion = async (

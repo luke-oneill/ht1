@@ -269,6 +269,15 @@ describeDatabase("form processing", () => {
 			status: "conflict",
 			acceptedIngestionId: first.body.rawFormId,
 		});
+		const conflicts = await request(app).get("/ingestions?status=conflict");
+		expect(conflicts.body).toEqual({
+			ingestions: [{
+				ingestionId: changed.body.rawFormId,
+				acceptedIngestionId: first.body.rawFormId,
+				createdAt: expect.any(String),
+			}],
+			hasMore: false,
+		});
 	});
 
 	it("classifies an identical redelivery with different key order as a duplicate", async () => {

@@ -5,6 +5,9 @@ CREATE TABLE raw_forms (
     status text NOT NULL DEFAULT 'received'
         CHECK (status IN ('received', 'ingested', 'duplicate', 'conflict', 'invalid')),
     accepted_raw_form_id uuid REFERENCES raw_forms(id),
+    CONSTRAINT raw_forms_accepted_owner_check CHECK (
+        (status IN ('duplicate', 'conflict')) = (accepted_raw_form_id IS NOT NULL)
+    ),
     error_message text,
     last_attempted_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now()
