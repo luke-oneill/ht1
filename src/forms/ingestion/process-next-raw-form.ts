@@ -1,6 +1,9 @@
 import { Pool } from "pg";
 import type { IngestedForm } from "../contracts/ingested-form";
-import { InvalidFormError, parseIngestedForm } from "./parse-ingested-form";
+import {
+	InvalidFormError,
+	parseIngestedFormWithDrift,
+} from "./parse-ingested-form";
 
 type Database = Pick<Pool, "query">;
 
@@ -24,8 +27,9 @@ export const processNextRawForm = async (
 	console.info("Worker picked up raw form", { rawFormId: rawForm.id });
 
 	let form: IngestedForm;
+	let unexpectedFieldPaths: string[];
 	try {
-		form = parseIngestedForm(rawForm.payload);
+		({ form, unexpectedFieldPaths } = parseIngestedFormWithDrift(rawForm.payload));
 	} catch (error) {
 		if (!(error instanceof InvalidFormError)) throw error;
 		await database.query(`
@@ -38,6 +42,14 @@ export const processNextRawForm = async (
 			error: error.message,
 		});
 		return { status: "invalid", rawFormId: rawForm.id };
+	}
+
+	if (unexpectedFieldPaths.length > 0) {
+		console.warn("Provider schema drift detected", {
+			rawFormId: rawForm.id,
+			applicationReference: form.application_reference,
+			unexpectedFieldPaths,
+		});
 	}
 
 	const saved = await database.query<{
