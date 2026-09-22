@@ -1,0 +1,10 @@
+{
+	"session_id": "55555555-5555-4555-8555-555555555555",
+	"application_reference": "MANUAL-SCHEMA-CHANGE-2026",
+	"name": "Schema Change",
+	"email": "schema.change@example.com",
+	"gender": "female",
+	"date_of_birth": "1995-10-10",
+	"mobile_number": "07000000005",
+	"address": "5 Provider Broke The Contract, London, SW1A 2AA"
+}

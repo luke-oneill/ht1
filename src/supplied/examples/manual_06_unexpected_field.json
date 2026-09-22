@@ -1,0 +1,16 @@
+{
+	"session_id": "66666666-6666-4666-8666-666666666666",
+	"application_reference": "MANUAL-ETHNICITY-2026",
+	"name": "Schema Drift",
+	"email": "schema.drift@example.com",
+	"gender": "other",
+	"date_of_birth": "1990-06-06",
+	"mobile_number": "07000000006",
+	"ethnicity": "example-provider-value",
+	"address": {
+		"address_line_1": "6 Contract Close",
+		"address_line_2": "London",
+		"postcode": "SW1A 1AA",
+		"country": "United Kingdom"
+	}
+}

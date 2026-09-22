@@ -1,4 +1,4 @@
-type IngestedFormSchema = {
+export type IngestedForm = {
 	session_id: string;
 	application_reference: string;
 	name: string;
@@ -15,4 +15,3 @@ type IngestedFormSchema = {
 		country: string;
 	};
 };
-

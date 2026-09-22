@@ -1,11 +1,47 @@
-import express, { Request, Response } from "express";
+import express, { NextFunction, Request, Response } from "express";
+import { Pool } from "pg";
+import { createIngestRouter } from "./routes/ingest";
+import { createIngestionsRouter } from "./routes/ingestions";
 
-const app = express();
+interface BodyParserError extends Error {
+	status?: number;
+	type?: string;
+}
 
-app.use(express.json());
+const isBodyParserError = (error: unknown): error is BodyParserError => {
+	if (!(error instanceof Error) || !("type" in error)) return false;
+	return error.type === "entity.too.large" || error.type === "entity.parse.failed";
+};
 
-app.post("/ingest", (req: Request, res: Response) => {
-	res.json({ message: "Ingesting form data" });
-});
+export const createApp = (database: Pick<Pool, "query">) => {
+	const app = express();
 
-export default app;
+	app.use((req, _res, next) => {
+		console.info("Request received", { method: req.method, path: req.path });
+		next();
+	});
+	app.use(express.json({ limit: "100kb" }));
+	app.use("/ingest", createIngestRouter(database));
+	app.use("/ingestions", createIngestionsRouter(database));
+
+	app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
+		if (!isBodyParserError(error)) {
+			next(error);
+			return;
+		}
+
+		if (error.type === "entity.too.large") {
+			res.status(413).json({ error: "Request body is too large" });
+			return;
+		}
+
+		if (error.type === "entity.parse.failed") {
+			res.status(400).json({ error: "Request body must be a JSON object" });
+			return;
+		}
+
+		next(error);
+	});
+
+	return app;
+};

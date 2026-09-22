@@ -1,0 +1,18 @@
+{
+	"session_id": "22222222-2222-4222-8222-222222222222",
+	"application_reference": "MANUAL-SINGLE-NAME-2026",
+	"name": "Madonna",
+	"email": "single.name@example.com",
+	"gender": "other",
+	"date_of_birth": "1980-08-16",
+	"phone_number": "020 0000 0002",
+	"mobile_number": "07000000002",
+	"address": {
+		"address_line_1": "2 Edge Case Close",
+		"address_line_2": "Bristol",
+		"address_line_3": "Avon",
+		"postcode": "BS1 1AA",
+		"country": "United Kingdom",
+		"county_code": "unexpected-nested-field"
+	}
+}
