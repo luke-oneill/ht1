@@ -1,5 +1,5 @@
 import { parseIngestedForm } from "../src/forms/ingestion/parse-ingested-form";
-import ethnicityExample from "../src/supplied/examples/manual_06_unexpected_ethnicity.json";
+import ethnicityExample from "../src/supplied/examples/manual_06_unexpected_field.json";
 import personOne from "../src/supplied/examples/person_one.json";
 
 describe("form validation", () => {
