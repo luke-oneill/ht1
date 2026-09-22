@@ -26,8 +26,8 @@ describe("POST /ingest", () => {
 			status: "received",
 		});
 		expect(query).toHaveBeenCalledWith(
-			"INSERT INTO raw_forms (id, payload) VALUES ($1, $2)",
-			[response.body.rawFormId, payload],
+			"INSERT INTO raw_forms (id, payload, payload_hash) VALUES ($1, $2, $3)",
+			[response.body.rawFormId, payload, expect.stringMatching(/^[0-9a-f]{64}$/)],
 		);
 	});
 

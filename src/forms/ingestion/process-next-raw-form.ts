@@ -5,7 +5,7 @@ import { InvalidFormError, parseIngestedForm } from "./parse-ingested-form";
 type Database = Pick<Pool, "query">;
 
 export type ProcessRawFormResult =
-	| { status: "ingested" | "duplicate"; rawFormId: string; applicationReference: string }
+	| { status: "ingested" | "duplicate" | "conflict"; rawFormId: string; applicationReference: string }
 	| { status: "invalid"; rawFormId: string };
 
 export const processNextRawForm = async (
@@ -40,8 +40,11 @@ export const processNextRawForm = async (
 		return { status: "invalid", rawFormId: rawForm.id };
 	}
 
-	const saved = await database.query<{ status: "ingested" | "duplicate" }>(`
-		WITH inserted AS (
+	const saved = await database.query<{
+		status: "ingested" | "duplicate" | "conflict";
+		accepted_raw_form_id: string | null;
+	}>(`
+		WITH owner AS (
 			INSERT INTO ingested_forms (
 				application_reference, raw_form_id, session_id, name, email, gender,
 				date_of_birth, phone_number, mobile_number, address_line_1,
@@ -49,23 +52,30 @@ export const processNextRawForm = async (
 			) VALUES (
 				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
 			)
-			ON CONFLICT (application_reference) DO NOTHING
+			-- The no-op update returns and locks the existing owner when two first
+			-- deliveries race; it never replaces accepted form data.
+			ON CONFLICT (application_reference) DO UPDATE
+			SET raw_form_id = ingested_forms.raw_form_id
 			RETURNING raw_form_id
-		), existing_owner AS (
-			SELECT raw_form_id
-			FROM ingested_forms
-			WHERE application_reference = $1
 		)
 		UPDATE raw_forms
 		SET status = CASE
-				WHEN EXISTS (SELECT 1 FROM inserted) THEN 'ingested'
-				WHEN EXISTS (SELECT 1 FROM existing_owner WHERE raw_form_id = $2) THEN 'ingested'
-				ELSE 'duplicate'
+				WHEN (SELECT raw_form_id FROM owner) = $2 THEN 'ingested'
+				WHEN payload_hash = (
+					SELECT original.payload_hash
+					FROM raw_forms AS original
+					WHERE original.id = (SELECT raw_form_id FROM owner)
+				) THEN 'duplicate'
+				ELSE 'conflict'
+			END,
+			accepted_raw_form_id = CASE
+				WHEN (SELECT raw_form_id FROM owner) = $2 THEN NULL
+				ELSE (SELECT raw_form_id FROM owner)
 			END,
 			error_message = NULL,
 			last_attempted_at = now()
 		WHERE id = $2
-		RETURNING status
+		RETURNING status, accepted_raw_form_id
 	`, [
 		form.application_reference,
 		rawForm.id,
@@ -87,6 +97,7 @@ export const processNextRawForm = async (
 		rawFormId: rawForm.id,
 		applicationReference: form.application_reference,
 		status,
+		acceptedRawFormId: saved.rows[0].accepted_raw_form_id,
 	});
 	return {
 		status,

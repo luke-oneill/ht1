@@ -1,8 +1,10 @@
 CREATE TABLE raw_forms (
     id uuid PRIMARY KEY,
     payload jsonb NOT NULL,
+    payload_hash text NOT NULL CHECK (payload_hash ~ '^[0-9a-f]{64}$'),
     status text NOT NULL DEFAULT 'received'
-        CHECK (status IN ('received', 'ingested', 'duplicate', 'invalid')),
+        CHECK (status IN ('received', 'ingested', 'duplicate', 'conflict', 'invalid')),
+    accepted_raw_form_id uuid REFERENCES raw_forms(id),
     error_message text,
     last_attempted_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now()

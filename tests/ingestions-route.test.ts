@@ -8,6 +8,7 @@ const updatedAt = "2026-09-21T10:00:00.000Z";
 const row = (overrides: Record<string, unknown> = {}) => ({
 	raw_form_id: ingestionId,
 	raw_status: "ingested",
+	accepted_raw_form_id: null,
 	raw_error_message: null,
 	processing_status: "complete",
 	processing_error: null,
@@ -43,6 +44,31 @@ describe("ingestion inspection", () => {
 			failedStep: null,
 			errorMessage: null,
 			updatedAt,
+		});
+		expect(response.body).not.toHaveProperty("payload");
+	});
+
+	it("links a conflict to the accepted ingestion without exposing either payload", async () => {
+		const acceptedId = "70f74dbe-a196-440b-9702-c7688d06054b";
+		const { database } = createDatabase({
+			rows: [row({
+				raw_status: "conflict",
+				accepted_raw_form_id: acceptedId,
+				processing_status: null,
+			})],
+			rowCount: 1,
+		});
+
+		const response = await request(createApp(database)).get(`/ingestions/${ingestionId}`);
+
+		expect(response.status).toBe(200);
+		expect(response.body).toEqual({
+			ingestionId,
+			status: "conflict",
+			failedStep: null,
+			errorMessage: null,
+			updatedAt,
+			acceptedIngestionId: acceptedId,
 		});
 		expect(response.body).not.toHaveProperty("payload");
 	});

@@ -4,7 +4,8 @@ type Database = Pick<Pool, "query">;
 
 type IngestionRow = {
 	raw_form_id: string;
-	raw_status: "received" | "ingested" | "duplicate" | "invalid";
+	raw_status: "received" | "ingested" | "duplicate" | "conflict" | "invalid";
+	accepted_raw_form_id: string | null;
 	raw_error_message: string | null;
 	processing_status: "pending" | "awaiting_notification" | "complete" | "invalid" | "failed" | null;
 	processing_error: string | null;
@@ -18,6 +19,7 @@ export type IngestionStatus =
 	| "awaiting-notification"
 	| "complete"
 	| "duplicate"
+	| "conflict"
 	| "failed";
 
 export type IngestionInspection = {
@@ -26,6 +28,7 @@ export type IngestionInspection = {
 	failedStep: FailedStep | null;
 	errorMessage: string | null;
 	updatedAt: Date | string;
+	acceptedIngestionId?: string;
 };
 
 export type RetryIngestionResult =
@@ -45,6 +48,7 @@ const selectIngestion = async (
 		SELECT
 			raw.id::text AS raw_form_id,
 			raw.status AS raw_status,
+			raw.accepted_raw_form_id::text,
 			raw.error_message AS raw_error_message,
 			ingested.processing_status,
 			ingested.processing_error,
@@ -72,13 +76,20 @@ const toInspection = (row: IngestionRow): IngestionInspection => {
 		};
 	}
 
-	if (row.raw_status === "received" || row.raw_status === "duplicate") {
+	if (
+		row.raw_status === "received"
+		|| row.raw_status === "duplicate"
+		|| row.raw_status === "conflict"
+	) {
 		return {
 			ingestionId: row.raw_form_id,
 			status: row.raw_status,
 			failedStep: null,
 			errorMessage: row.raw_error_message,
 			updatedAt: row.updated_at,
+			...(row.accepted_raw_form_id
+				? { acceptedIngestionId: row.accepted_raw_form_id }
+				: {}),
 		};
 	}
 

@@ -4,6 +4,7 @@ import request from "supertest";
 import { createApp } from "../src/app";
 import { databaseConfig } from "../src/database/pool";
 import { runMigrations } from "../src/database/migration-runner";
+import { processNextRawForm } from "../src/forms/ingestion/process-next-raw-form";
 import personOne from "../src/supplied/examples/person_one.json";
 import { createFormWorker } from "../src/workers/form-worker";
 
@@ -55,8 +56,8 @@ describeDatabase("form processing", () => {
 		const rawFormId = randomUUID();
 		const applicationReference = `STATUSES-${randomUUID()}`;
 		await testPool.query(
-			"INSERT INTO raw_forms (id, payload, status) VALUES ($1, $2, 'ingested')",
-			[rawFormId, {}],
+			"INSERT INTO raw_forms (id, payload, payload_hash, status) VALUES ($1, $2, $3, 'ingested')",
+			[rawFormId, {}, "0".repeat(64)],
 		);
 		await testPool.query(`
 			INSERT INTO ingested_forms (
@@ -89,8 +90,8 @@ describeDatabase("form processing", () => {
 		const rawFormId = randomUUID();
 		const applicationReference = `NAME-CONSTRAINTS-${randomUUID()}`;
 		await testPool.query(
-			"INSERT INTO raw_forms (id, payload, status) VALUES ($1, $2, 'ingested')",
-			[rawFormId, {}],
+			"INSERT INTO raw_forms (id, payload, payload_hash, status) VALUES ($1, $2, $3, 'ingested')",
+			[rawFormId, {}, "0".repeat(64)],
 		);
 
 		await expect(testPool.query(`
@@ -216,7 +217,7 @@ describeDatabase("form processing", () => {
 		}]);
 	});
 
-	it("retains changed duplicate deliveries without replacing the first valid form", async () => {
+	it("classifies a changed delivery as a conflict without replacing the first valid form", async () => {
 		const applicationReference = `DUPLICATE-${randomUUID()}`;
 		const app = createApp(testPool);
 		const first = await request(app).post("/ingest").send({
@@ -242,7 +243,7 @@ describeDatabase("form processing", () => {
 		});
 		await expect(worker.nextTick()).resolves.toMatchObject({ status: "complete" });
 		await expect(worker.nextTick()).resolves.toEqual({
-			status: "duplicate",
+			status: "conflict",
 			rawFormId: changed.body.rawFormId,
 			applicationReference,
 		});
@@ -253,7 +254,7 @@ describeDatabase("form processing", () => {
 		expect(raw.rows).toHaveLength(2);
 		expect(raw.rows.find(({ id }) => id === changed.body.rawFormId)).toMatchObject({
 			payload: expect.objectContaining({ name: "Changed Name" }),
-			status: "duplicate",
+			status: "conflict",
 		});
 		const ingested = await testPool.query(
 			"SELECT session_id, name FROM ingested_forms WHERE application_reference = $1",
@@ -263,6 +264,41 @@ describeDatabase("form processing", () => {
 			session_id: personOne.session_id,
 			name: personOne.name,
 		}]);
+		const inspection = await request(app).get(`/ingestions/${changed.body.rawFormId}`);
+		expect(inspection.body).toMatchObject({
+			status: "conflict",
+			acceptedIngestionId: first.body.rawFormId,
+		});
+	});
+
+	it("classifies an identical redelivery with different key order as a duplicate", async () => {
+		const applicationReference = `REDELIVERY-${randomUUID()}`;
+		const app = createApp(testPool);
+		const payload = { ...personOne, application_reference: applicationReference };
+		const first = await request(app).post("/ingest").send(payload);
+		const redelivery = await request(app).post("/ingest").send({
+			application_reference: applicationReference,
+			address: payload.address,
+			mobile_number: payload.mobile_number,
+			phone_number: payload.phone_number,
+			date_of_birth: payload.date_of_birth,
+			gender: payload.gender,
+			email: payload.email,
+			name: payload.name,
+			session_id: payload.session_id,
+		});
+
+		await expect(processNextRawForm(testPool)).resolves.toMatchObject({ status: "ingested" });
+		await expect(processNextRawForm(testPool)).resolves.toEqual({
+			status: "duplicate",
+			rawFormId: redelivery.body.rawFormId,
+			applicationReference,
+		});
+		const duplicate = await request(app).get(`/ingestions/${redelivery.body.rawFormId}`);
+		expect(duplicate.body).toMatchObject({
+			status: "duplicate",
+			acceptedIngestionId: first.body.rawFormId,
+		});
 	});
 
 	it("rotates stages so new deliveries do not starve an ingested form", async () => {
