@@ -12,7 +12,9 @@ CREATE TABLE ingested_forms (
     application_reference text PRIMARY KEY,
     raw_form_id uuid NOT NULL UNIQUE REFERENCES raw_forms(id),
     session_id text NOT NULL,
-    name text NOT NULL,
+    name text NOT NULL
+        CONSTRAINT ingested_forms_name_check
+        CHECK (name ~ '^[^[:space:]]+( [^[:space:]]+)+$'),
     email text NOT NULL,
     gender text NOT NULL CHECK (gender IN ('male', 'female', 'other')),
     date_of_birth date NOT NULL,
@@ -40,8 +42,12 @@ CREATE TABLE ingested_forms (
 CREATE TABLE transformed_forms (
     application_reference text PRIMARY KEY REFERENCES ingested_forms(application_reference),
     session_id text NOT NULL,
-    first_name text NOT NULL,
-    last_name text NOT NULL,
+    first_name text NOT NULL
+        CONSTRAINT transformed_forms_first_name_check
+        CHECK (first_name ~ '^[^[:space:]]+$'),
+    last_name text NOT NULL
+        CONSTRAINT transformed_forms_last_name_check
+        CHECK (last_name ~ '^[^[:space:]]+( [^[:space:]]+)*$'),
     email text NOT NULL,
     gender text NOT NULL CHECK (gender IN ('male', 'female', 'prefer-not-to-say')),
     date_of_birth date NOT NULL,
